@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP-ASIR · Conecta tu IA con herramientas reales</title>
+<meta name="description" content="Miniproyecto de ASIR: un servidor MCP para que tu IA haga cosas, no solo hablar.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔌</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F5F7FA; --grid:#DDE3EC; --ink:#142038; --muted:#55627A;
+  --card:#FFFFFF; --line:#C9D2E0; --accent:#1F5FFF; --accent-ink:#FFFFFF;
+  --code-bg:#0F1A30; --code-ink:#E6ECF8; --fill:#FFD84D; --fill-ink:#142038;
+  --sans:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E1626; --grid:#18233A; --ink:#EAF0FB; --muted:#9AA8C2;
+    --card:#152038; --line:#2A3A5C; --accent:#6C97FF; --accent-ink:#0E1626;
+    --code-bg:#09101E; --code-ink:#E6ECF8;
+  }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; color:var(--ink); font-family:var(--sans); font-size:1.0625rem; line-height:1.6;
+  background-color:var(--bg);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:32px 32px;
+}
+a{color:var(--accent)}
+:focus-visible{outline:3px solid var(--accent); outline-offset:3px; border-radius:6px}
+.wrap{max-width:860px; margin:0 auto; padding:0 1.25rem}
+section{padding:4rem 0}
+h1{font-size:clamp(2.6rem,9vw,5.2rem); line-height:.98; letter-spacing:-.035em; font-weight:800; margin:0 0 1.25rem}
+h2{font-size:clamp(1.7rem,5vw,2.3rem); letter-spacing:-.02em; line-height:1.1; margin:0 0 .6rem}
+p{margin:0 0 1rem; max-width:60ch}
+.lead{font-size:1.25rem; color:var(--muted)}
+
+/* Hero */
+.hero{padding:5rem 0 2.5rem}
+.eyebrow{display:inline-flex;align-items:center;gap:.55rem;margin:0 0 1.15rem;color:var(--accent);font:600 .78rem var(--mono);letter-spacing:.07em;text-transform:uppercase}
+.eyebrow::before{content:"";width:.55rem;height:.55rem;border-radius:50%;background:currentColor}
+.btns{display:flex; flex-wrap:wrap; gap:.75rem; margin-top:1.75rem}
+.btn{display:inline-block; padding:.8rem 1.3rem; border-radius:10px; font-weight:600; text-decoration:none; border:2px solid var(--ink); color:var(--ink); background:transparent}
+.btn.primary{background:var(--accent); border-color:var(--accent); color:var(--accent-ink)}
+.btn:hover{transform:translateY(-2px)}
+.btn{transition:transform .15s}
+
+/* Arquitectura */
+.flow{display:grid; grid-template-columns:1fr auto 1fr auto 1fr; align-items:stretch; gap:0; margin:2rem 0 1rem}
+.node{background:var(--card); border:2px solid var(--ink); border-radius:14px; padding:1.1rem 1rem; text-align:center}
+.node b{display:block; font-size:1.25rem; letter-spacing:-.01em}
+.node span{display:block; font-size:.92rem; color:var(--muted); line-height:1.35; margin-top:.3rem}
+.node.mid{border-color:var(--accent); border-style:dashed}
+.link{position:relative; width:clamp(34px,8vw,90px); align-self:center; height:2px; background:var(--ink)}
+.link::after{
+  content:""; position:absolute; top:-5px; left:0; width:12px; height:12px; border-radius:50%;
+  background:var(--accent); animation:go 2.4s ease-in-out infinite;
+}
+.link.back::after{animation-direction:reverse; animation-delay:.6s}
+@keyframes go{0%{left:0;opacity:0}15%{opacity:1}85%{opacity:1}100%{left:calc(100% - 12px);opacity:0}}
+.legend{display:grid; gap:.6rem; margin-top:1.5rem}
+.legend p{margin:0; padding-left:1rem; border-left:4px solid var(--accent)}
+
+/* Pasos */
+.steps{list-style:none; padding:0; margin:2rem 0 0; display:grid; gap:1.5rem; counter-reset:s}
+.steps>li{counter-increment:s; position:relative; min-width:0; padding-left:3.4rem}
+.steps>li::before{
+  content:counter(s); position:absolute; left:0; top:0; width:2.4rem; height:2.4rem; border-radius:50%;
+  display:grid; place-items:center; font-weight:800; background:var(--ink); color:var(--bg);
+}
+.steps h3{margin:.15rem 0 .4rem; font-size:1.2rem}
+.steps p{margin-bottom:.6rem}
+.code{position:relative; background:var(--code-bg); color:var(--code-ink); border-radius:12px; margin:0}
+.code pre{margin:0; padding:1rem 1rem 1rem 1.1rem; overflow-x:auto; font:400 .88rem/1.6 var(--mono)}
+.copy{
+  position:absolute; top:.5rem; right:.5rem; font:600 .78rem var(--sans); cursor:pointer;
+  background:#243455; color:#fff; border:0; border-radius:7px; padding:.35rem .65rem;
+}
+.copy:hover{background:var(--accent)}
+.fill{background:var(--fill); color:var(--fill-ink); padding:0 .25rem; border-radius:4px}
+.hint{font-size:.95rem; color:var(--muted)}
+.access-note{margin:1.5rem 0; padding:1.1rem 1.25rem; background:var(--card); border:2px solid var(--line); border-radius:12px}
+.access-note h3{margin:0 0 .35rem; font-size:1.1rem}
+.access-note p:last-child{margin-bottom:0}
+.url-row{display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem;background:var(--code-bg);color:var(--code-ink);border-radius:12px;min-width:0}
+.url-row code{flex:1;min-width:0;overflow-wrap:anywhere;background:none;padding:0;font-size:.85rem;line-height:1.5;color:inherit}
+.url-row .copy{position:static;flex:none;font-size:.85rem;padding:.55rem .8rem}
+.guide{margin-top:2rem;padding:clamp(1.2rem,4vw,2rem);border:2px solid var(--line);border-radius:18px;background:var(--card)}
+.guide .steps{margin-top:1.5rem;gap:1.5rem}
+.guide .steps>li{padding-left:3rem}
+.guide .steps>li::before{width:2.2rem;height:2.2rem;background:var(--accent);color:var(--accent-ink)}
+.tag{display:inline-block;margin:0 0 .65rem;color:var(--accent);font:600 .75rem var(--mono);letter-spacing:.06em;text-transform:uppercase}
+.optional{margin-top:1.25rem;background:var(--card);border:2px solid var(--line);border-radius:14px;padding:1rem 1.2rem}
+.optional summary{cursor:pointer;font-weight:600}
+.optional p{margin-top:.85rem}
+.optional .code{margin:1rem 0}
+.example{border-left:4px solid var(--accent);padding:.25rem 0 .25rem 1rem;margin:1.75rem 0 0;color:var(--muted)}
+code{font-family:var(--mono); font-size:.9em; background:var(--grid); padding:.05rem .3rem; border-radius:4px}
+
+footer{padding:2rem 0 4rem; color:var(--muted); font-size:.95rem; border-top:2px solid var(--line)}
+
+@media (max-width:640px){
+  .flow{grid-template-columns:1fr; gap:0}
+  .link{width:2px; height:34px; justify-self:center}
+  .link::after{left:-5px; top:0; animation-name:godown}
+  @keyframes godown{0%{top:0;opacity:0}15%{opacity:1}85%{opacity:1}100%{top:calc(100% - 12px);opacity:0}}
+  .hero{padding-top:3rem}
+  .code pre{padding-top:3rem}
+  section{padding:3rem 0}
+  .url-row{align-items:stretch;flex-direction:column}
+  .url-row .copy{align-self:flex-start}
+  .steps>li{padding-left:3rem}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .link::after{animation:none; left:calc(50% - 6px); opacity:1}
+  .btn{transition:none}
+}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Un proyecto para clase</p>
+    <h1>MCP-ASIR</h1>
+    <p class="lead">Conecta tu IA con los materiales de ASIR. Haz preguntas, encuentra apuntes y vuelve a las fuentes de clase.</p>
+    <div class="btns">
+      <a class="btn primary" href="#conectar">Cómo conectarlo</a>
+      <a class="btn" href="https://github.com/raulb1zkit/MCP-ASIR">Ver el código</a>
+    </div>
+  </div>
+</header>
+
+<main>
+<section id="arquitectura">
+  <div class="wrap">
+    <h2>Cómo funciona</h2>
+    <p>Tres piezas, nada más. Tu IA pide, el protocolo MCP lo lleva por internet y el servidor lo ejecuta.</p>
+
+    <div class="flow" role="img" aria-label="Diagrama: tu cliente de IA habla con el protocolo MCP, que habla con el servidor MCP-ASIR">
+      <div class="node"><b>Tu IA</b><span>Claude, Cursor, VS Code…</span></div>
+      <div class="link"></div>
+      <div class="node mid"><b>MCP</b><span>Por internet, con tu URL y tu credencial</span></div>
+      <div class="link back"></div>
+      <div class="node"><b>MCP-ASIR</b><span>El servidor, ya en marcha</span></div>
+    </div>
+
+    <div class="legend">
+      <p><b>Tu IA</b> es el cliente: la app donde escribes.</p>
+      <p><b>MCP</b> es el protocolo, como un USB-C: un mismo enchufe para conectar cualquier herramienta a cualquier IA.</p>
+      <p><b>MCP-ASIR</b> es este proyecto: un servidor que ya está online esperando. No te lo descargas, solo te conectas con tu URL y tu credencial.</p>
+    </div>
+  </div>
+</section>
+
+<section id="conectar">
+  <div class="wrap">
+    <span class="tag">Guía rápida</span>
+    <h2>Conéctalo con Google</h2>
+    <!--email_off--><p>Necesitas una aplicación compatible con MCP remoto y acceso aprobado previamente. Para solicitarlo, escribe a <a href="mailto:me@raulcn.com">me@raulcn.com</a> indicando tu cuenta de Google.</p><!--/email_off-->
+    <div class="url-row"><code id="c1">https://mcp.bztracker.xyz/mcp</code><button class="copy" data-t="c1" aria-label="Copiar dirección del MCP">Copiar URL</button></div>
+
+    <div class="guide">
+      <span class="tag">Ejemplo · Claude</span>
+      <h3>Conéctalo en 3 pasos</h3>
+      <ol class="steps">
+        <li><h3>Añade el conector</h3><p>En Claude, abre <b>Personalizar → Conectores</b> y elige <b>Añadir conector personalizado</b>. Llámalo MCP-ASIR y pega la URL de arriba.</p></li>
+        <li><h3>Entra con Google</h3><p>Pulsa <b>Conectar</b>, elige tu cuenta y autoriza la conexión. Iniciar sesión no concede acceso automáticamente: espera a que se apruebe tu solicitud y vuelve a conectar. Si te pide cómo registrar el cliente, elige <b>Register automatically</b>.</p></li>
+        <li><h3>Pregunta por tus apuntes</h3><p>Activa MCP-ASIR en la conversación y pide a Claude que busque en los materiales de tu asignatura.</p></li>
+      </ol>
+      <p class="example">Por ejemplo: «Busca en ASO cómo cambiar la prioridad de un proceso y dime de qué apuntes sale».</p>
+    </div>
+    <p class="hint" style="margin-top:1rem">La disponibilidad de conectores personalizados depende del cliente y de su plan. En otros clientes compatibles, busca la opción de añadir un servidor MCP remoto.</p>
+
+    <details class="optional">
+      <summary>¿Tienes un token personal?</summary>
+      <p>También puedes usar un token facilitado por Raúl en clientes que admitan credenciales fijas. Trátalo como una contraseña y no lo publiques.</p>
+      <div class="code"><pre id="c2">{
+  "mcpServers": {
+    "mcp-asir": {
+      "url": "https://mcp.bztracker.xyz/mcp",
+      "headers": {
+        "Authorization": "Bearer <span class="fill">TU_CREDENCIAL</span>"
+      }
+    }
+  }
+}</pre><button class="copy" data-t="c2" aria-label="Copiar ejemplo de configuración con token">Copiar</button></div>
+      <p class="hint">Sustituye el marcador por tu token. Si tu cliente dispone de un almacén de secretos, úsalo; evita pegarlo en comandos del historial.</p>
+    </details>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    Hecho por <a href="https://github.com/raulb1zkit">Raúl</a> para ASIR · <a href="https://github.com/raulb1zkit/MCP-ASIR">Código en GitHub</a>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll('.copy').forEach(function(b){
+  b.addEventListener('click', function(){
+    var el = document.getElementById(b.dataset.t);
+    try {
+      var original = b.textContent;
+      navigator.clipboard.writeText(el.innerText).then(function(){
+        b.textContent = 'Copiado';
+        setTimeout(function(){ b.textContent = original; }, 1500);
+      }).catch(function(){ b.textContent = 'Selecciona y copia'; });
+    } catch (e) { b.textContent = 'Selecciona y copia'; }
+  });
+});
+</script>
+</body>
+</html>

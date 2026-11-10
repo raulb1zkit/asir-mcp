@@ -1,0 +1,10 @@
+asir.bztracker.xyz {
+	@consent path /oauth/consent /oauth/consent/*
+	header @consent X-Frame-Options "DENY"
+	header @consent Content-Security-Policy "frame-ancestors 'none'"
+	reverse_proxy 127.0.0.1:8081
+}
+
+mcp.bztracker.xyz {
+	reverse_proxy 127.0.0.1:8080
+}

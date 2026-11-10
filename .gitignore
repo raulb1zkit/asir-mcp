@@ -1,0 +1,16 @@
+/conversacion.md
+
+# Credenciales y sesiones locales
+.env
+.env.*
+!.env.example
+.private/
+
+# Material educativo y artefactos derivados; se versiona el software
+/data/
+/backups/
+/landing/oauth/consent/config.js
+__pycache__/
+*.pyc
+.venv/
+.obsidian/

@@ -1,0 +1,4 @@
+-r requirements-semantic.in
+mcp==2.3.0
+PyJWT[crypto]==2.15.1
+psycopg[binary]==3.3.8

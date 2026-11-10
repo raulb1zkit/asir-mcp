@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "purpose": "Conjunto de desarrollo inicial; requiere referencias privadas fijadas en data/aso/eval/gold.json.",
+  "questions": [
+    {"id": "process_list", "query": "Qué muestra ps aux y cómo listar los procesos", "category": "command"},
+    {"id": "running_priority", "query": "Cómo cambiar la prioridad de un proceso que ya está ejecutándose", "category": "paraphrase"},
+    {"id": "survive_terminal", "query": "Quiero que un programa siga funcionando después de cerrar la terminal", "category": "paraphrase"},
+    {"id": "shell_jobs", "query": "Cómo ver y recuperar los trabajos suspendidos o en segundo plano", "category": "paraphrase"},
+    {"id": "weekly_job", "query": "Ejecutar una orden todos los lunes a las ocho de la mañana", "category": "paraphrase"},
+    {"id": "other_crontab", "query": "Cómo editar el crontab de otro usuario", "category": "command"},
+    {"id": "missed_job", "query": "Qué usar si una tarea programada no se ejecutó porque el ordenador estaba apagado", "category": "paraphrase"},
+    {"id": "one_off_job", "query": "Programar una orden para dentro de dos horas y ejecutarla una sola vez", "category": "paraphrase"},
+    {"id": "cron_access", "query": "Para qué sirven cron.allow y cron.deny", "category": "command"},
+    {"id": "passwd_fields", "query": "Qué campos aparecen en /etc/passwd y cómo están separados", "category": "command"},
+    {"id": "shift_args", "query": "Cómo desplazar los parámetros posicionales de un script con shift", "category": "command"},
+    {"id": "while_loop", "query": "Repetir instrucciones mientras se cumpla una condición en Bash", "category": "paraphrase"},
+    {"id": "case_patterns", "query": "Elegir un bloque de instrucciones según el patrón que coincida con una variable", "category": "paraphrase"},
+    {"id": "local_scope", "query": "Cómo evitar que una variable definida dentro de una función cambie la variable global", "category": "paraphrase"},
+    {"id": "function_args", "query": "Cómo pasar varios parámetros a una función de Bash", "category": "paraphrase"},
+    {"id": "grep_filter", "query": "Buscar líneas que contienen un patrón usando grep", "category": "command"},
+    {"id": "sed_inplace", "query": "Cómo guardar directamente en el archivo los cambios hechos con sed", "category": "command"},
+    {"id": "sed_variable", "query": "Por qué una variable de Bash no se expande dentro de las comillas simples de sed", "category": "command"},
+    {"id": "awk_columns", "query": "Extraer la primera y tercera columna de un archivo separado por campos", "category": "paraphrase"},
+    {"id": "sort_unique", "query": "Ordenar numéricamente un archivo y contar las líneas repetidas", "category": "paraphrase"}
+  ],
+  "out_of_scope_probes": [
+    {"id": "photosynthesis", "query": "Fotosíntesis y cloroplastos en las plantas"},
+    {"id": "rome", "query": "Fecha de fundación de Roma y la leyenda de Rómulo"},
+    {"id": "kubernetes", "query": "Manifiesto Kubernetes para un StatefulSet de PostgreSQL"}
+  ]
+}

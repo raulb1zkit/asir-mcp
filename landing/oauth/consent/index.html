@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; connect-src https://kwvezxkhrjouaidzoglj.supabase.co; base-uri 'none'; form-action 'none'">
+  <title>Autorizar conexión · MCP-ASIR</title>
+  <style>
+    :root{color-scheme:light dark;font-family:system-ui,-apple-system,sans-serif;--bg:#f5f7fa;--grid:#dde3ec;--ink:#142038;--muted:#55627a;--card:#fff;--line:#c9d2e0;--accent:#1f5fff;--accent-ink:#fff;--soft:#eef3ff}
+    @media(prefers-color-scheme:dark){:root{--bg:#0e1626;--grid:#18233a;--ink:#eaf0fb;--muted:#aab6ce;--card:#152038;--line:#2a3a5c;--accent:#8badff;--accent-ink:#0e1626;--soft:#1c2d4e}}
+    *{box-sizing:border-box}
+    body{margin:0;background-color:var(--bg);background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:32px 32px;color:var(--ink);line-height:1.55}
+    main{width:min(100% - 2rem,600px);margin:clamp(2rem,8vh,6rem) auto}
+    .brand{display:inline-flex;align-items:center;gap:.55rem;margin-bottom:1.25rem;color:var(--accent);font-size:.76rem;font-weight:750;letter-spacing:.1em;text-transform:uppercase}
+    .brand::before{content:"";width:.55rem;height:.55rem;border-radius:50%;background:currentColor}
+    .card{background:var(--card);border:2px solid var(--line);border-radius:18px;padding:clamp(1.3rem,5vw,2.25rem);box-shadow:0 12px 36px #0e162610}
+    h1{font-size:clamp(1.6rem,5vw,2rem);letter-spacing:-.035em;line-height:1.15;margin:0 0 .8rem}p{margin:0 0 1rem}
+    #status{color:var(--muted);margin-bottom:1.4rem}
+    .identity{padding:.85rem 1rem;border-radius:10px;background:var(--soft);overflow-wrap:anywhere}
+    .identity strong{display:inline-block;margin-right:.35rem}
+    dl{overflow-wrap:anywhere;border-top:1px solid var(--line);margin:1.3rem 0}
+    dt{font-weight:700;font-size:.8rem;letter-spacing:.035em;color:var(--muted);text-transform:uppercase;margin-top:1rem}
+    dd{margin:.2rem 0 0;font-weight:600}
+    button{font:inherit;font-weight:700;cursor:pointer;padding:.75rem 1.05rem;border:2px solid var(--line);border-radius:10px;background:transparent;color:var(--ink)}
+    button:hover{border-color:var(--accent)}button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}button:disabled{opacity:.55;cursor:wait}
+    button.minor{padding:.3rem .55rem;font-size:.8rem;border-width:1px}
+    .actions{display:flex;flex-wrap:wrap;gap:.6rem;margin-top:1.5rem}
+    .back{margin:1.25rem 0 0;font-size:.9rem}.back a{color:var(--muted);text-decoration-thickness:1px;text-underline-offset:3px}
+    [hidden]{display:none!important}:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+    @media(max-width:420px){.actions{flex-direction:column}.actions button,#google{width:100%}.identity button{margin-top:.5rem}}
+  </style>
+  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O" crossorigin="anonymous"></script>
+  <script defer src="./config.js"></script>
+  <script defer src="./consent.js"></script>
+</head>
+<body>
+  <main><div class="brand">MCP-ASIR · acceso</div><div class="card">
+    <h1>Conectar con MCP-ASIR</h1>
+    <p id="status" role="status" aria-live="polite">Comprobando la solicitud…</p>
+    <div id="sign-in" hidden>
+      <p>Inicia sesión con tu cuenta de Google para revisar qué aplicación solicita acceso.</p>
+      <button class="primary" id="google" type="button">Continuar con Google</button>
+    </div>
+    <div id="consent" hidden>
+      <p class="identity">Sesión: <strong id="identity"></strong> <button class="minor" id="switch-account" type="button">Cambiar cuenta</button></p>
+      <p>Esta aplicación solicita conectar con MCP-ASIR:</p>
+      <dl><dt>Aplicación</dt><dd id="client"></dd><dt>Permisos solicitados</dt><dd id="scopes"></dd><dt>Volverá a</dt><dd id="redirect"></dd></dl>
+      <!--email_off--><p>El acceso requiere aprobación previa. Escribe a <a href="mailto:me@raulcn.com">me@raulcn.com</a> indicando la cuenta de Google con la que has iniciado sesión. Autorizar esta conexión no concede acceso por sí solo; cuando se apruebe tu solicitud, vuelve a conectar.</p><!--/email_off-->
+      <div class="actions"><button class="primary" id="approve" type="button">Autorizar</button><button id="deny" type="button">Cancelar</button></div>
+    </div>
+    <p class="back"><a href="/">← Volver a MCP-ASIR</a></p>
+  </div></main>
+</body>
+</html>
