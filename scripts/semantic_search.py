@@ -181,9 +181,9 @@ def build_semantic(database=DEFAULT_DB, model_dir=MODEL_DIR, destination=INDEX_P
 
 
 class Retriever:
-    def __init__(self, database=DEFAULT_DB, model_dir=MODEL_DIR, index_path=INDEX_PATH):
+    def __init__(self, database=DEFAULT_DB, model_dir=MODEL_DIR, index_path=INDEX_PATH, threads=2):
         self.engine = SearchEngine(database)
-        self.model_dir, self.index_path = model_dir, index_path
+        self.model_dir, self.index_path, self.threads = model_dir, index_path, threads
         self.encoder = None
         self.vectors, self.metadata = None, None
 
@@ -193,7 +193,7 @@ class Retriever:
     def load_semantic(self):
         if self.encoder is not None:
             return
-        encoder = LocalEncoder(self.model_dir)
+        encoder = LocalEncoder(self.model_dir, threads=self.threads)
         np = encoder.np
         with np.load(self.index_path, allow_pickle=False) as bundle:
             vectors = bundle["vectors"]

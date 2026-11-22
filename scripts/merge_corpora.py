@@ -50,8 +50,12 @@ def merge(inputs, output):
     destination = output / "chunks.jsonl"
     temporary = destination.with_suffix(".tmp")
     with temporary.open("w", encoding="utf-8") as stream:
-        for chunk in merged.values():
-            stream.write(json.dumps(chunk, ensure_ascii=False) + "\n")
+        for chunk_id in sorted(merged):
+            chunk = merged[chunk_id]
+            # El orden del inventario o de las claves JSON no es un cambio
+            # docente. Mantener corpus y contexto E5 deterministas.
+            chunk["citations"].sort(key=lambda c: json.dumps(c, sort_keys=True, ensure_ascii=False))
+            stream.write(json.dumps(chunk, ensure_ascii=False, sort_keys=True) + "\n")
     temporary.replace(destination)
     report = {"schema_version": 1, "chunker_version": "merge-1", "created_at": datetime.now(timezone.utc).isoformat(), "complete": True, "inputs": reports, "output_sha256": digest(destination), "summary": {"chunks": len(merged), "input_chunks": total, "duplicates_merged": total - len(merged), "citations": sum(len(x["citations"]) for x in merged.values())}}
     save_json(output / "report.json", report)

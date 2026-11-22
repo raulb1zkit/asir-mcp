@@ -1,83 +1,70 @@
 # MCP-ASIR
 
-[English](README-EN.md)
+Servidor MCP para recuperar materiales del ciclo ASIR desde una base de
+documentos con búsqueda híbrida (léxica + semántica) sobre PostgreSQL/pgvector,
+con referencias verificables y permisos por asignatura. Proyecto educativo de
+infraestructura: ingesta nocturna desde Moodle, versionado del corpus,
+respaldo cifrado y monitorización.
 
-Servidor MCP para consultar materiales de Administración de Sistemas
-Informáticos en Red (ASIR) mediante búsqueda híbrida y respuestas con fuentes.
-El proyecto explora cómo conectar un corpus documental privado con clientes de
-IA sin entregarles acceso directo a la base de datos ni a la plataforma educativa.
+- [Arquitectura y operación](docs/arquitectura.md)
+- [Docker, CI y despliegue](docs/docker-ci.md)
+- [Versionado y publicación delta del corpus](docs/rag-versioning.md)
+- [Respaldo cifrado y restauración](docs/backup-restauracion.md)
+- [Monitorización, panel y avisos](docs/monitorizacion.md)
+- [Registro de cursos y exclusiones](docs/registro-cursos.md)
+- [Landing y pantalla de consentimiento](landing/README.md)
 
-> El código es público; el corpus no lo es. El acceso al servidor desplegado
-> requiere aprobación individual. Para solicitarlo, escribe a
-> [me@raulcn.com](mailto:me@raulcn.com) indicando tu cuenta de Google.
+## Qué incluye este repositorio
 
-## Qué hace
+- `scripts/`: sincronización, extracción/OCR, fragmentación, importación,
+  servidor MCP (stdio y HTTP), autenticación (OAuth y tokens), búsqueda,
+  evaluación, versionado delta, respaldo cifrado, monitorización y avisos.
+- `tests/`: suite sintética completa, sin corpus real ni credenciales;
+  incluye pruebas de PostgreSQL/pgvector aisladas (`tests/rag/`) y del Worker
+  externo de salud (node:test).
+- `deploy/`: compose, unidades systemd endurecidas, fixtures sintéticas de CI
+  y el Worker externo de salud para Cloudflare.
+- `dashboard/` y `graph/`: panel local de operaciones y atlas local de chunks.
+- `landing/`: sitio estático de presentación y pantalla de consentimiento.
+- `config/courses.json`: **plantilla sintética** del registro de cursos.
 
-- Extrae y fragmenta documentos, conservando procedencia y localizadores.
-- Combina búsqueda léxica y semántica y permite consultar fragmentos con citas.
-- Expone herramientas MCP de lectura, sin shell ni SQL arbitrario.
-- Controla el acceso por usuario y asignatura, con revocación individual.
-- Permite evaluar recuperación y cobertura; los resultados no garantizan que
-  una respuesta generada sea correcta.
+## Ejemplo de uso del servidor MCP local
 
-```mermaid
-flowchart LR
-    Cliente[Cliente MCP y modelo del usuario] -->|HTTPS| CF[Cloudflare]
-    CF --> VPS[VPS: MCP y embeddings de consulta]
-    VPS --> DB[(Supabase: PostgreSQL y pgvector)]
-    Auth[Google y Supabase Auth] -->|OAuth| Cliente
-```
-
-Los embeddings de documentos se preparan previamente. El VPS calcula los de
-las consultas; Supabase almacena el corpus y los vectores y ejecuta la búsqueda.
-La ingestión y el OCR también pueden ejecutarse localmente. Las credenciales,
-documentos originales, texto derivado y referencias privadas de evaluación no
-forman parte de este repositorio.
-
-## Conectarse
-
-La [landing](https://asir.bztracker.xyz/) explica cómo añadir el servidor a un
-cliente compatible. Iniciar sesión con Google o aceptar el consentimiento no
-concede acceso automáticamente: el propietario debe aprobar la cuenta. No todos
-los clientes MCP tienen el mismo soporte para OAuth o conectores remotos.
-
-## Ejecutar las pruebas
-
-Se necesita Python 3.12 o posterior y Node.js para la prueba de consentimiento.
-Los requisitos fijados pueden depender de la plataforma; se han probado en Linux
-con Python 3.14.
+Tras preparar los índices locales (corpus propio y modelo de embeddings):
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements-mcp.txt
-.venv/bin/python -m unittest discover -s tests
-node --test tests/test_oauth_consent.js
+.venv/bin/python scripts/semantic_search.py query "Cómo cambiar la prioridad de un proceso"
 ```
 
-Las pruebas emplean datos ficticios y no necesitan acceder al corpus de
-producción. Ejecutar el servicio con datos reales requiere además preparar
-índices, modelo, configuración privada y base de datos; no hay un corpus de
-ejemplo incluido. Consulta [arquitectura y operación](docs/arquitectura.md).
+Comprobación del servidor MCP local, después de instalar `requirements-mcp.txt`:
 
-## Estructura
+```bash
+.venv/bin/python scripts/check_mcp.py
+```
 
-| Ruta | Contenido |
-| --- | --- |
-| `scripts/` | Ingestión, indexación, búsquedas, servidor MCP y administración |
-| `landing/` | Presentación y pantalla de consentimiento OAuth |
-| `deploy/` | Ejemplos de proxy y configuración OAuth |
-| `evaluation/` | Preguntas genéricas de desarrollo, sin referencias privadas |
-| `tests/` | Pruebas con datos simulados |
-| `docs/` | Arquitectura, acceso y limitaciones |
+La CI pública construye la imagen, valida los compose y ejecuta un smoke
+funcional con fixtures sintéticas: salud 200, autorización 401 sin token y
+métricas en el volumen con uid no privilegiado.
 
-## Límites y uso responsable
+## Configuración
 
-Este proyecto es educativo. Los documentos recuperados son datos no fiables,
-no instrucciones para el agente. El OCR puede equivocarse y la recuperación
-puede omitir o interpretar mal contenido; revisa siempre las fuentes. Un cliente
-que use un proveedor de IA externo puede enviarle los fragmentos recuperados y
-consumir su cuota. Solo deben indexarse y compartirse materiales para los que se
-tenga permiso, respetando los datos personales y los términos aplicables.
+La configuración sensible (conexión a la base de datos, tokens, cookies de
+Moodle, credenciales de respaldo y avisos) vive fuera de Git. Las referencias
+de proyecto y origen aceptan variables de entorno con valores de ejemplo
+(`ASIR_SUPABASE_PROJECT_REF`, `ASIR_MOODLE_ORIGIN`, ...); consulta
+[docs/registro-cursos.md](docs/registro-cursos.md) y la
+[política de seguridad](SECURITY.md). Algunas herramientas de evaluación
+esperan datos privados que no se publican: con este repositorio solo no se
+pueden ejecutar íntegramente.
 
-El proyecto se desarrolló con asistencia de IA; las decisiones, la revisión y
-la responsabilidad de su publicación corresponden a su autor.
+## Estado
+
+El servidor MCP remoto funciona detrás de Cloudflare, con búsqueda híbrida,
+referencias y permisos por asignatura; la autenticación con Google requiere
+aprobación individual y existen tokens personales independientes. La imagen de
+producción se fija por digest y el respaldo cifrado y la sincronización delta
+tienen sus temporizadores habilitados con guardas que fallan cerrado. Los
+detalles operativos del despliegue real permanecen en el repositorio privado.
+El historial de decisiones y etapas anteriores se conserva íntegro en el
+repositorio privado; [CHANGELOG.md](CHANGELOG.md) resume las capacidades
+vigentes de este código.

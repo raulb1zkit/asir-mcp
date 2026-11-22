@@ -41,6 +41,8 @@ def load_local(chunks_path, report_path, semantic_path, model_path):
             raise SearchFailure("invalid_chunk_integrity")
         if chunk.get("characters") != len(chunk["text"]):
             raise SearchFailure("invalid_chunk_characters")
+        for citation in chunk["citations"]:
+            citation["source"].setdefault("moodle_active", None)
         chunks.append(chunk)
     if not chunks or len({c["id"] for c in chunks}) != len(chunks):
         raise SearchFailure("empty_or_duplicate_chunks")
@@ -207,8 +209,10 @@ def create_schema(connection, *, grant_reader=True):
               source_key text PRIMARY KEY CHECK (source_key ~ '^[0-9a-f]{64}$'),
               sha256 text NOT NULL REFERENCES asir.sources(sha256),
               subject text NOT NULL, section text NOT NULL, title text NOT NULL,
-              filename text NOT NULL, url text, mime text, path text
+              filename text NOT NULL, url text, mime text, path text,
+              moodle_active boolean
             );
+            ALTER TABLE asir.source_occurrences ADD COLUMN IF NOT EXISTS moodle_active boolean;
             ALTER TABLE asir.citations ADD COLUMN IF NOT EXISTS source_key text REFERENCES asir.source_occurrences(source_key);
             CREATE INDEX IF NOT EXISTS source_occurrences_filter_idx ON asir.source_occurrences(subject, section);
             CREATE OR REPLACE VIEW asir.citation_sources WITH (security_invoker = true) AS
@@ -220,7 +224,8 @@ def create_schema(connection, *, grant_reader=True):
               COALESCE(o.filename, s.filename) AS filename,
               CASE WHEN o.source_key IS NULL THEN s.url ELSE o.url END AS url,
               CASE WHEN o.source_key IS NULL THEN s.mime ELSE o.mime END AS mime,
-              CASE WHEN o.source_key IS NULL THEN s.path ELSE o.path END AS path
+              CASE WHEN o.source_key IS NULL THEN s.path ELSE o.path END AS path,
+              o.moodle_active AS moodle_active
             FROM asir.citations ci JOIN asir.sources s ON s.sha256 = ci.source_sha256
             LEFT JOIN asir.source_occurrences o ON o.source_key = ci.source_key;
             """
@@ -252,7 +257,7 @@ def source_key(source):
     return hashlib.sha256(json.dumps(fields, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
 
-def import_corpus(connection, data):
+def import_corpus(connection, data, *, reset_identity=True):
     chunks = data["chunks"]
     metadata = data["metadata"]
     report = data["report"]
@@ -262,7 +267,8 @@ def import_corpus(connection, data):
         cursor.execute("SELECT pg_advisory_xact_lock(hashtext('asir-import'))")
         cursor.execute(
             "TRUNCATE asir.embedding_windows, asir.citation_segments, asir.citations, asir.source_occurrences, "
-            "asir.chunks, asir.sources, asir.corpus, asir.embedding_metadata RESTART IDENTITY CASCADE"
+            "asir.chunks, asir.sources, asir.corpus, asir.embedding_metadata "
+            + ("RESTART IDENTITY " if reset_identity else "CONTINUE IDENTITY ") + "CASCADE"
         )
         cursor.execute(
             "INSERT INTO asir.corpus (schema_version, corpus_sha256, chunker_version, created_at, report) "
@@ -295,15 +301,15 @@ def import_corpus(connection, data):
             for citation in chunk["citations"]:
                 source = citation["source"]
                 sources[source["sha256"]] = source
-                occurrences[source_key(source)] = {**source, "source_key": source_key(source)}
+                occurrences[source_key(source)] = {**source, "moodle_active": source.get("moodle_active"), "source_key": source_key(source)}
         cursor.executemany(
             "INSERT INTO asir.sources (sha256, subject, section, title, filename, url, mime, path) "
             "VALUES (%(sha256)s, %(subject)s, %(section)s, %(title)s, %(filename)s, %(url)s, %(mime)s, %(path)s)",
             list(sources.values()),
         )
         cursor.executemany(
-            "INSERT INTO asir.source_occurrences (source_key, sha256, subject, section, title, filename, url, mime, path) "
-            "VALUES (%(source_key)s, %(sha256)s, %(subject)s, %(section)s, %(title)s, %(filename)s, %(url)s, %(mime)s, %(path)s)",
+            "INSERT INTO asir.source_occurrences (source_key, sha256, subject, section, title, filename, url, mime, path, moodle_active) "
+            "VALUES (%(source_key)s, %(sha256)s, %(subject)s, %(section)s, %(title)s, %(filename)s, %(url)s, %(mime)s, %(path)s, %(moodle_active)s)",
             list(occurrences.values()),
         )
 
@@ -345,7 +351,10 @@ def import_corpus(connection, data):
             "INSERT INTO asir.citation_segments (citation_id, ordinal, source_unit_id, locator, start_char, end_char, method, quality) VALUES (%s,%s,%s,%s::jsonb,%s,%s,%s,%s)",
             segment_rows,
         )
-        if citation_id:
+        if citation_id and reset_identity:
+            # Solo el importador administrativo (RESTART IDENTITY) sincroniza
+            # la secuencia. El rol diario inserta ids explícitos y no tiene
+            # UPDATE sobre secuencias; el corpus se sustituye completo.
             cursor.execute("SELECT setval(pg_get_serial_sequence('asir.citations', 'id'), %s)", (citation_id,))
 
         window_rows = []
@@ -379,7 +388,7 @@ def _db_chunks(connection):
         cursor.execute(
             "SELECT c.id, c.ordinal, c.text, c.text_sha256, c.characters, c.warnings, c.requires_review, "
             "ci.id AS citation_id, ci.ordinal AS citation_ordinal, ci.method, ci.previous_chunk_id, ci.next_chunk_id, "
-            "s.sha256 AS source_sha256, s.subject, s.section, s.title, s.filename, s.url, s.mime, s.path, "
+            "s.sha256 AS source_sha256, s.subject, s.section, s.title, s.filename, s.url, s.mime, s.path, s.moodle_active, "
             "seg.ordinal AS segment_ordinal, seg.source_unit_id, seg.locator, seg.start_char, seg.end_char, "
             "seg.method AS segment_method, seg.quality "
             "FROM asir.chunks c "
@@ -417,6 +426,7 @@ def _db_chunks(connection):
                     "mime": row["mime"],
                     "filename": row["filename"],
                     "subject": row["subject"],
+                    "moodle_active": row["moodle_active"],
                 },
                 "segments": [],
                 "method": row["method"],

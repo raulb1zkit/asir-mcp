@@ -133,7 +133,7 @@ class NumericalTests(unittest.TestCase):
     def test_failed_semantic_load_cannot_leave_a_valid_cached_state(self):
         import numpy as np
         class FakeEncoder:
-            def __init__(self, path):
+            def __init__(self, path, threads=2):
                 self.np = np
                 self.fingerprint = "expected"
         with tempfile.TemporaryDirectory() as tmp:

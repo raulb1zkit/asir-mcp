@@ -1,0 +1,11 @@
+[Unit]
+Description=Temporizador de evaluación de avisos MCP ASIR (60 s)
+
+[Timer]
+OnBootSec=120s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=asir-monitor-alerts.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Temporizador de muestreo de recursos MCP ASIR (60 s)
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=asir-monitor.service
+
+[Install]
+WantedBy=timers.target

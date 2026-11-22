@@ -1,0 +1,14 @@
+[Unit]
+Description=Actualizar corpus ASIR a las 02:00 de Madrid
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 Europe/Madrid
+# Respaldo para el día en que las 02:00 no existen; el servicio deduplica fecha.
+OnCalendar=*-*-* 03:00:00 Europe/Madrid
+OnBootSec=3min
+Persistent=true
+AccuracySec=1s
+Unit=asir-sync.service
+
+[Install]
+WantedBy=timers.target

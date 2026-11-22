@@ -1,0 +1,9 @@
+# Contexto de construcción por allowlist: solo entra el software necesario.
+# .gitignore no controla el contexto Docker, así que se niega todo y se
+# reabre explícitamente lo imprescindible para la imagen del MCP.
+*
+!scripts
+!scripts/**
+scripts/**/__pycache__/
+**/*.pyc
+!requirements-mcp.txt

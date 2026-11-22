@@ -8,6 +8,7 @@ from scripts.supabase_db import (
     DatabaseConfigError,
     EXPECTED_PROJECT,
     load_config,
+    ingest_config,
     validate_config,
     vector_literal,
 )
@@ -70,6 +71,17 @@ class ConfigTests(unittest.TestCase):
         path.chmod(0o644)
         with self.assertRaisesRegex(DatabaseConfigError, "600"):
             load_config(path)
+
+    def test_ingest_config_rejects_reader_and_administrator(self):
+        path = self.root / "ingest.json"
+        for role in ["postgres", "asir_reader", "asir_ingest"]:
+            path.write_text(json.dumps(config(self.root, user=role + "." + EXPECTED_PROJECT)))
+            path.chmod(0o600)
+            if role == "asir_ingest":
+                self.assertEqual(ingest_config(path)["role"], role)
+            else:
+                with self.assertRaises(DatabaseConfigError):
+                    ingest_config(path)
 
     def test_vector_literal_keeps_float32_roundtrip(self):
         self.assertEqual(vector_literal([0.0, 1.0, -0.5]), "[0,1,-0.5]")

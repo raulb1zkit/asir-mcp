@@ -19,7 +19,8 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit, un
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_COURSE = "https://moodle.example.org/course/view.php?id=123"
+DEFAULT_COURSE = os.environ.get("ASIR_MOODLE_COURSE_URL",
+    "https://moodle.example.edu/course/view.php?id=1001")
 MODULES = {"resource", "folder", "page", "book", "assign"}
 SAFE_QUERY = {"id", "section", "chapterid", "forceview", "redirect", "forcedownload"}
 
@@ -53,6 +54,7 @@ class Node:
 
 class Document(HTMLParser):
     VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+    INACTIVE = {"template", "noscript", "script", "style"}
 
     def __init__(self, html):
         super().__init__(convert_charrefs=True)
@@ -82,8 +84,22 @@ class Document(HTMLParser):
     def handle_data(self, data):
         self.current.children.append(data)
 
+    def inactive(self, node):
+        """Ignora plantillas y nodos ocultos que no forman parte del contenido visible."""
+        current = node
+        while isinstance(current, Node):
+            if current.tag in self.INACTIVE:
+                return True
+            if "hidden" in current.attrs or current.attrs.get("aria-hidden", "").lower() == "true":
+                return True
+            style = current.attrs.get("style", "").replace(" ", "").lower()
+            if "display:none" in style or "visibility:hidden" in style:
+                return True
+            current = current.parent
+        return False
+
     def main(self):
-        nodes = list(self.root.walk())
+        nodes = [n for n in self.root.walk() if not self.inactive(n)]
         for node in nodes:
             if node.attrs.get("id") == "region-main":
                 return node
@@ -139,7 +155,10 @@ def section_title(node):
         if current.attrs.get("data-sectionname"):
             return compact(current.attrs["data-sectionname"])[:200]
         classes = current.attrs.get("class", "").split()
-        if "section" in classes or "course-section" in classes or current.attrs.get("id", "").startswith("section-"):
+        # Las listas de actividades también usan class="section"; no son el
+        # contenedor del curso y pueden contener encabezados internos.
+        if ("course-section" in classes or current.attrs.get("id", "").startswith("section-")
+                or ("section" in classes and current.tag != "ul")):
             headings = [n for n in current.walk() if n.tag in {"h2", "h3"}]
             heading = next((n for n in headings if "sectionname" in n.attrs.get("class", "").split()), next(iter(headings), None))
             if heading:
@@ -170,14 +189,24 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 class Client:
-    def __init__(self, course, cookie, delay=1.0, max_bytes=64 * 1024 * 1024):
+    def __init__(self, course, cookie, delay=1.0, max_bytes=64 * 1024 * 1024, session_file=None):
         self.course, self.cookie = course, cookie
         self.delay, self.max_bytes = delay, max_bytes
-        self.opener = build_opener(NoRedirect())
+        self.web_session = None
+        if session_file is not None:
+            try:
+                from .moodle_auth import WebSession, AuthError
+            except ImportError:
+                from moodle_auth import WebSession, AuthError
+            try:
+                self.web_session = WebSession(course, session_file)
+            except AuthError:
+                raise ImportFailure("No se pudo abrir la sesión privada de Moodle.") from None
+        self.opener = self.web_session.opener if self.web_session else build_opener(NoRedirect())
         self.last_request = 0.0
         self.requests = 0
 
-    def get(self, url):
+    def get(self, url, *, metadata_only=False):
         for _ in range(8):
             if not same_origin(url, self.course):
                 raise ImportFailure("Redirección a otro origen bloqueada; la cookie no se ha enviado.")
@@ -188,7 +217,10 @@ class Client:
             if any(k not in SAFE_QUERY for k, _ in parse_qsl(urlsplit(url).query)):
                 raise ImportFailure("Redirección con parámetros no permitidos.")
             time.sleep(max(0, self.delay - (time.monotonic() - self.last_request)))
-            req = Request(url, headers={"Cookie": self.cookie, "User-Agent": "MCP-ASIR-course-import/0.1", "Accept-Encoding": "identity"})
+            headers = {"User-Agent": "MCP-ASIR-course-import/0.1", "Accept-Encoding": "identity"}
+            if self.web_session is None:
+                headers["Cookie"] = self.cookie
+            req = Request(url, headers=headers)
             self.requests += 1
             self.last_request = time.monotonic()
             try:
@@ -209,19 +241,32 @@ class Client:
             except (URLError, TimeoutError, OSError):
                 raise ImportFailure("Fallo de red/TLS o tiempo de espera agotado.") from None
             with response:
-                content = response.read(self.max_bytes + 1)
-                if len(content) > self.max_bytes:
-                    raise ImportFailure("Recurso superior al límite de tamaño configurado.")
                 mime = response.headers.get_content_type()
                 charset = response.headers.get_content_charset() or "utf-8"
                 filename = response.headers.get_filename()
+                final_url = getattr(response, "geturl", lambda: url)() or url
+                # El inventario inspecciona páginas de módulos, pero nunca lee
+                # el cuerpo de un archivo al que el módulo redirige.
+                if metadata_only and (urlsplit(final_url).path.startswith("/pluginfile.php/") or mime != "text/html"):
+                    content = b""
+                    doc = None
+                else:
+                    content = response.read(self.max_bytes + 1)
+                    if len(content) > self.max_bytes:
+                        raise ImportFailure("Recurso superior al límite de tamaño configurado.")
                 # Moodle puede devolver HTML de login con HTTP 200, incluso al pedir un PDF.
                 prefix = content[:512].lstrip().lower()
                 html = mime == "text/html" or prefix.startswith((b"<!doctype html", b"<html"))
-                doc = Document(content.decode(charset, errors="replace")) if html else None
+                if not metadata_only or content:
+                    doc = Document(content.decode(charset, errors="replace")) if html else None
                 if doc and is_login(url, doc):
                     raise SessionExpired("Moodle devolvió el formulario de login; renueva la cookie.")
-                return {"url": canonical(url), "content": content, "mime": mime, "filename": filename, "doc": doc}
+                if self.web_session is not None:
+                    try:
+                        self.web_session.save()
+                    except Exception:
+                        raise ImportFailure("No se pudo persistir la sesión rotada de Moodle.") from None
+                return {"url": canonical(final_url), "content": content, "mime": mime, "filename": filename, "doc": doc}
         raise ImportFailure("Demasiadas redirecciones.")
 
 
@@ -283,6 +328,7 @@ def run(args, client):
     report = {"version": 1, "course_url": args.course_url, "subject": subject, "started_at": datetime.now(timezone.utc).isoformat(), "mode": args.mode, "complete": False, "items": [], "issues": []}
     queue = deque([{"url": args.course_url, "kind": "course", "title": subject, "section": ""}])
     seen = set()
+    course_sections = set()
     try:
         while queue:
             item = queue.popleft()
@@ -297,7 +343,7 @@ def run(args, client):
             if item["kind"] == "unsupported":
                 report["items"].append({**item, "status": "unsupported"})
                 continue
-            if args.mode == "inventory" and item["kind"] not in {"course", "section"}:
+            if args.mode == "inventory" and item["kind"] == "file":
                 report["items"].append({**item, "status": "discovered"})
                 continue
             cached = previous_items.get(item["url"], {})
@@ -307,11 +353,15 @@ def run(args, client):
                     report["items"].append({**cached, "section": item["section"], "change": "cached"})
                     continue
             try:
-                response = client.get(item["url"])
+                response = client.get(item["url"], metadata_only=args.mode == "inventory")
                 doc = response["doc"]
+                if args.mode == "inventory" and item["kind"] in MODULES and doc is None:
+                    report["items"].append({**item, "resolved_url": response["url"], "status": "discovered"})
+                    continue
                 # Un HTML servido desde pluginfile es un archivo de clase, no
                 # una página de navegación Moodle: no sigas enlaces de su código.
-                if item["kind"] == "file" and urlsplit(response["url"]).path.startswith("/pluginfile.php/"):
+                # El módulo (resource/folder/etc.) puede redirigir a pluginfile.
+                if urlsplit(response["url"]).path.startswith("/pluginfile.php/"):
                     doc = None
                 if doc:
                     content_root = None
@@ -322,10 +372,20 @@ def run(args, client):
                     found = list(links(doc, response["url"], args.course_url, root=content_root))
                     for target in found:
                         target["section"] = (target["section"] or item["section"]) if item["kind"] in {"course", "section"} else item["section"]
+                        if target["kind"] == "section":
+                            # section.php no incluye el id del curso. Solo confiamos
+                            # en secciones descubiertas desde una página de curso;
+                            # así una sección enlazada por otra sección no puede
+                            # arrastrar recursos de un curso distinto.
+                            if item["kind"] != "course" and target["url"] not in course_sections:
+                                continue
+                            course_sections.add(target["url"])
                         if target["kind"] == "file" and item["kind"] in {"resource", "folder", "page", "book", "assign"}:
                             target["title"] = item["title"]
                         queue.append(target)
-                    if item["kind"] in {"page", "book", "assign"}:
+                    if args.mode == "inventory":
+                        saved = {}
+                    elif item["kind"] in {"page", "book", "assign"}:
                         content = page_text(doc, item["kind"])
                         saved = {**store(output, content), "mime": "text/plain", "filename": item["kind"] + ".txt", "representation": "extracted-text"}
                     elif item["kind"] in {"resource", "file"} and not any(n["kind"] == "file" for n in found):
@@ -340,6 +400,7 @@ def run(args, client):
                     saved = {**store(output, response["content"]), "mime": response["mime"], "filename": filename, "representation": "original"}
                 entry = {**item, **saved, "status": "downloaded" if saved else "scanned"}
                 if saved:
+                    entry["moodle_active"] = True
                     entry["change"] = "unchanged" if previous.get(item["url"]) == saved["sha256"] else "updated" if previous.get(item["url"]) else "new"
                 report["items"].append(entry)
             except SessionExpired:
@@ -381,7 +442,7 @@ def main():
         if args.delay < 0.5 or args.max_resources < 1 or args.max_mb < 1:
             raise ImportFailure("Límites no válidos.")
         cookie = load_cookie(args.session_file)
-        return run(args, Client(args.course_url, cookie, args.delay, args.max_mb * 1024 * 1024))
+        return run(args, Client(args.course_url, cookie, args.delay, args.max_mb * 1024 * 1024, session_file=args.session_file))
     except FileNotFoundError:
         print("Falta un archivo local; prepara la sesión con python scripts/moodle_session.py.", file=sys.stderr)
     except (ImportFailure, ValueError, RecursionError, socket.timeout) as error:

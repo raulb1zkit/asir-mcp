@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Reinicio acotado del MCP en contenedor.
+#
+# La unidad envolvente asir-mcp.service invoca este programa en ExecStart y
+# ExecStop, de modo que el sudo limitado de asir-sync
+# (/usr/bin/systemctl restart asir-mcp.service) sigue reiniciando únicamente
+# el MCP, ahora como contenedor, sin conceder acceso al socket de Docker.
+set -euo pipefail
+
+PROJECT_DIR=/opt/asir/mcp
+MAINTENANCE_MARKER=/etc/asir/maintenance
+
+cd "$PROJECT_DIR"
+
+case "${1:-}" in
+  start)
+    # Doble barrera: la unidad ya exige la ausencia del marcador.
+    if [ -e "$MAINTENANCE_MARKER" ]; then
+      echo "asir-mcp-container: mantenimiento activo, no se arranca" >&2
+      exit 1
+    fi
+    docker compose up -d --no-deps mcp
+    # Espera acotada a que el contenedor esté en ejecución (no a la salud:
+    # la sonda del publicador espera el HTTP con reintentos).
+    cid="$(docker compose ps -q mcp)"
+    for _ in $(seq 1 40); do
+      if [ -n "$cid" ]; then
+        state="$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || true)"
+        if [ "$state" = "running" ]; then
+          exit 0
+        fi
+      fi
+      sleep 1
+      cid="$(docker compose ps -q mcp)"
+    done
+    echo "asir-mcp-container: el contenedor no llegó a ejecutarse" >&2
+    exit 1
+    ;;
+  stop)
+    docker compose stop -t 30 mcp
+    ;;
+  status)
+    docker compose ps mcp
+    ;;
+  *)
+    echo "uso: $0 start|stop|status" >&2
+    exit 2
+    ;;
+esac

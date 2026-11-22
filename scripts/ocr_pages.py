@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import hashlib
 import io
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -111,11 +112,11 @@ def tasks_from_report(report_path, source_root, scope="missing"):
             if page_key in seen_pages:
                 raise ExtractionFailure("ambiguous_ocr_page")
             seen_pages.add(page_key)
-            tasks.append({"source": source, "original": original, "page": page, "unit_id": unit["id"], "standalone_image": mime.startswith("image/")})
+            tasks.append({"source": source, "original": original, "page": page, "unit_id": unit["id"], "standalone_image": mime.startswith("image/"), "locator": unit["locator"]})
     return tasks
 
 
-def process(task, output, config, tessdata, preview=False):
+def task_identity(task, config):
     key = {"source_sha256": task["source"]["sha256"], "page": task["page"], "config": config}
     if task.get("image_member"):
         key["image_member"] = task["image_member"]
@@ -123,11 +124,98 @@ def process(task, output, config, tessdata, preview=False):
     fingerprint = hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()
     suffix = "p" + str(task["page"]) if task["page"] is not None else "img" + hashlib.sha256((task["image_member"] + "|" + task["unit_id"]).encode()).hexdigest()[:16]
     relative = Path("pages") / f"{task['source']['sha256']}-{suffix}.json"
+    return fingerprint, relative
+
+
+def valid_cached_result(value, task, config):
+    """Valida identidad, contenido y datos de calidad antes de reutilizar."""
+    if not isinstance(value, dict):
+        return False
+    fingerprint, _ = task_identity(task, config)
+    text, confidence = value.get("text"), value.get("mean_confidence")
+    expected_locator = task.get("locator", {"page": task["page"]})
+    expected_method = "page-raster-ocr" if task["page"] is not None else "embedded-image-ocr"
+    if (value.get("schema_version") != 1 or value.get("fingerprint") != fingerprint
+        or value.get("config") != config or value.get("source_unit_id") != task["unit_id"]
+        or not isinstance(value.get("source"), dict) or value["source"].get("sha256") != task["source"]["sha256"]
+        or value.get("locator") != expected_locator or value.get("method") != expected_method
+        or not isinstance(text, str) or value.get("text_sha256") != hashlib.sha256(text.encode()).hexdigest()
+        or isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not math.isfinite(confidence) or not 0 <= confidence <= 100
+        or not isinstance(value.get("warnings"), list) or not all(isinstance(w, str) for w in value["warnings"])
+        or "ocr_requires_review" not in value["warnings"] or not isinstance(value.get("words"), list)):
+        return False
+    for word in value["words"]:
+        if not isinstance(word, dict) or not isinstance(word.get("text"), str):
+            return False
+        score = word.get("confidence")
+        if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score) or not 0 <= score <= 100:
+            return False
+        if not all(isinstance(word.get(k), int) and not isinstance(word[k], bool) and word[k] >= 0 for k in ("left", "top", "width", "height")):
+            return False
+    return True
+
+
+def reuse_index(report_path, config, scope):
+    """Solo indexa informes completos y compatibles; datos inválidos son misses."""
+    if report_path is None:
+        return {}
+    try:
+        report_path = Path(report_path)
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        if (report.get("schema_version") != 1 or report.get("complete") is not True or report.get("errors")
+            or report.get("mode") != "all" or report.get("config") != config
+            or report.get("scope") not in ({"images", "missing"} if scope == "missing" else {"images"})):
+            return {}
+        root = report_path.parent.resolve()
+        index = {}
+        duplicates = set()
+        for entry in report["pages"]:
+            identity = (entry["source_sha256"], entry["source_unit_id"], entry["page"])
+            path = (root / entry["path"]).resolve()
+            if not path.is_relative_to(root) or path == root:
+                continue  # Nunca leer rutas externas ni enlaces que salgan del directorio.
+            if identity in index:
+                duplicates.add(identity)
+            index[identity] = (path, entry.get("document_sha256"))
+        for identity in duplicates:
+            index.pop(identity, None)
+        return index
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}
+
+
+def copy_cached(task, output, config, index):
+    entry = index.get((task["source"]["sha256"], task["unit_id"], task["page"]))
+    if entry is None:
+        return None
+    path, expected_hash = entry
+    try:
+        raw = path.read_bytes()
+        if expected_hash is not None and hashlib.sha256(raw).hexdigest() != expected_hash:
+            return None
+        value = json.loads(raw)
+        if not valid_cached_result(value, task, config):
+            return None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    _, relative = task_identity(task, config)
+    value["source"] = task["source"]  # El título/ruta actuales pueden cambiar sin cambiar bytes.
     target = output / relative
-    if target.exists():
-        cached = json.loads(target.read_text(encoding="utf-8"))
-        if cached.get("fingerprint") == fingerprint and cached.get("source_unit_id") == task["unit_id"] and hashlib.sha256(cached["text"].encode()).hexdigest() == cached.get("text_sha256"):
-            return {"path": relative.as_posix(), "source_sha256": key["source_sha256"], "page": task["page"], "characters": len(cached["text"]), "mean_confidence": cached["mean_confidence"], "cached": True, "source_unit_id": task["unit_id"]}
+    save_json(target, value)
+    target.with_suffix(".txt").write_text(value["text"] + "\n", encoding="utf-8")
+    return page_entry(task, relative, value, True, target)
+
+
+def page_entry(task, relative, result, cached, target):
+    return {"path": relative.as_posix(), "source_sha256": task["source"]["sha256"], "page": task["page"], "characters": len(result["text"]), "mean_confidence": result["mean_confidence"], "cached": cached, "source_unit_id": task["unit_id"], "document_sha256": hashlib.sha256(target.read_bytes()).hexdigest()}
+
+
+def process(task, output, config, tessdata, preview=False):
+    fingerprint, relative = task_identity(task, config)
+    target = output / relative
+    reused = copy_cached(task, output, config, {(task["source"]["sha256"], task["unit_id"], task["page"]): (target, None)})
+    if reused:
+        return reused
     with tempfile.TemporaryDirectory(prefix="mcp-asir-ocr-") as tmp:
         prefix = Path(tmp) / "page"
         if task.get("standalone_image"):
@@ -154,19 +242,26 @@ def process(task, output, config, tessdata, preview=False):
     result = {"schema_version": 1, "fingerprint": fingerprint, "source": task["source"], "source_unit_id": task["unit_id"], "locator": task.get("locator", {"page": task["page"]}), "method": "page-raster-ocr" if task["page"] is not None else "embedded-image-ocr", "config": config, "text": text, "text_sha256": hashlib.sha256(text.encode()).hexdigest(), "words": words, "mean_confidence": confidence, "warnings": warnings}
     save_json(target, result)
     target.with_suffix(".txt").write_text(text + "\n", encoding="utf-8")
-    return {"path": relative.as_posix(), "source_sha256": key["source_sha256"], "page": task["page"], "characters": len(text), "mean_confidence": confidence, "cached": False, "source_unit_id": task["unit_id"]}
+    return page_entry(task, relative, result, False, target)
 
 
-def run(report_path, source_root, output, tessdata, languages="spa+eng", sample=False, workers=2, scope="missing"):
+def run(report_path, source_root, output, tessdata, languages="spa+eng", sample=False, workers=2, scope="missing", reuse_report=None):
     config = {"pipeline_version": VERSION, "tesseract": call(["tesseract", "--version"]).decode().splitlines()[0], "languages": languages, "models_sha256": model_hashes(tessdata, languages), "dpi": 180, "psm": 11, "format": "tsv"}
     tasks = tasks_from_report(report_path, source_root, scope)
     if sample:
         tasks = tasks[:1]
     output.mkdir(parents=True, exist_ok=True)
     report = {"schema_version": 1, "started_at": datetime.now(timezone.utc).isoformat(), "mode": "sample" if sample else "all", "scope": scope, "source_report_sha256": hashlib.sha256(report_path.read_bytes()).hexdigest(), "config": config, "pages": [], "errors": [], "complete": False}
+    prior = reuse_index(reuse_report, config, scope) if not sample else {}
     try:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            pending = {pool.submit(process, task, output, config, tessdata, sample): task for task in tasks}
+            pending = {}
+            for task in tasks:
+                reused = copy_cached(task, output, config, prior)
+                if reused:
+                    report["pages"].append(reused)
+                else:
+                    pending[pool.submit(process, task, output, config, tessdata, sample)] = task
             for future in as_completed(pending):
                 task = pending[future]
                 try:
@@ -180,7 +275,7 @@ def run(report_path, source_root, output, tessdata, languages="spa+eng", sample=
         report["complete"] = not report["errors"] and len(report["pages"]) == len(tasks)
     finally:
         report["finished_at"] = datetime.now(timezone.utc).isoformat()
-        report["summary"] = {"selected_pages": len(tasks), "processed_pages": len(report["pages"]), "pdf_pages": sum(p["page"] is not None for p in report["pages"]), "embedded_images": sum(p["page"] is None for p in report["pages"]), "nonempty_pages": sum(bool(p["characters"]) for p in report["pages"]), "characters": sum(p["characters"] for p in report["pages"]), "below_80_confidence": sum(p["mean_confidence"] < 80 for p in report["pages"])}
+        report["summary"] = {"selected_pages": len(tasks), "processed_pages": len(report["pages"]), "reused_pages": sum(bool(p.get("cached")) for p in report["pages"]), "new_pages": sum(not p.get("cached", False) for p in report["pages"]), "pdf_pages": sum(p["page"] is not None for p in report["pages"]), "embedded_images": sum(p["page"] is None for p in report["pages"]), "nonempty_pages": sum(bool(p["characters"]) for p in report["pages"]), "characters": sum(p["characters"] for p in report["pages"]), "below_80_confidence": sum(p["mean_confidence"] < 80 for p in report["pages"])}
         save_json(output / "report.json", report)
     print(json.dumps({"complete": report["complete"], **report["summary"], "errors": report["errors"], "report": str(output / "report.json")}, ensure_ascii=False))
     return 0 if report["complete"] else 1
@@ -194,13 +289,14 @@ def main():
     parser.add_argument("--tessdata-dir", type=Path, default=ROOT / "data/aso/tools/tessdata")
     parser.add_argument("--languages", default="spa+eng")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--reuse-report", type=Path, help="Reutiliza resultados OCR íntegros de un informe anterior compatible.")
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--scope", choices=["missing", "images"], default="missing", help="missing: páginas vacías; images: todas las páginas e imágenes ODT reconocidas.")
     args = parser.parse_args()
     if args.workers not in {1, 2, 3, 4}:
         parser.error("--workers debe estar entre 1 y 4")
     try:
-        return run(args.text_report, args.source_root, args.output or ROOT / "data/aso/ocr" / args.mode, args.tessdata_dir, args.languages, args.mode == "sample", args.workers, args.scope)
+        return run(args.text_report, args.source_root, args.output or ROOT / "data/aso/ocr" / args.mode, args.tessdata_dir, args.languages, args.mode == "sample", args.workers, args.scope, args.reuse_report)
     except (ExtractionFailure, OSError, ValueError, KeyError) as error:
         print(str(error) if isinstance(error, ExtractionFailure) else "No se han podido leer los datos locales de OCR.", file=sys.stderr)
         return 1

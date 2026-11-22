@@ -1,0 +1,20 @@
+[Unit]
+Description=Panel privado MCP ASIR
+After=network.target
+
+[Service]
+User=asir-dashboard
+Group=asir-dashboard
+WorkingDirectory=/opt/asir-dashboard/app
+ExecStart=/usr/bin/python3 /opt/asir-dashboard/app/dashboard/server.py --port 18767 --snapshot /var/lib/asir-dashboard/status.json
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

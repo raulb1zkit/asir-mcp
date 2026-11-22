@@ -1,0 +1,11 @@
+# Override para pruebas con configuración sintética (CI y smoke local):
+# sustituye los montajes reales por fixtures generados por ci/make-fixtures.sh.
+# El usuario por defecto de la imagen es 999:983; en local puede
+# sobrescribirse con ASIR_USER=<uid>:<gid> para igualar al propietario de los
+# fixtures (los archivos de configuración exigen propietario == usuario real).
+services:
+  mcp:
+    user: "${ASIR_USER:-999:983}"
+    volumes: !override
+      - ./ci/fixtures:/etc/asir:ro
+      - ./ci/state:/var/lib/asir

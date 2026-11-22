@@ -4,7 +4,8 @@ import asyncio
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from functools import partial
+from functools import partial, wraps
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,16 @@ MAX_OUTPUT_BYTES = 48000
 # Leave room for omission counters to gain digits after removing an item.
 OUTPUT_RESERVE = 64
 CHUNK_ID = re.compile(r"chunk:[0-9a-f]{64}\Z")
+
+
+def consistent_request(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        self._open()
+        request = getattr(self.retriever.engine, 'request', None)
+        with request() if callable(request) else nullcontext():
+            return method(self, *args, **kwargs)
+    return wrapped
 
 
 class MaterialError(Exception):
@@ -80,7 +91,7 @@ def references(citations, start=None, end=None):
         if not locations:
             continue
         source = citation["source"]
-        result.append({"source_id": source["sha256"], "subject": source["subject"], "unit": source["section"], "title": source["title"], "filename": source["filename"], "url": source.get("url"), "method": citation["method"], "locations": locations})
+        result.append({"source_id": source["sha256"], "subject": source["subject"], "unit": source["section"], "title": source["title"], "filename": source["filename"], "url": source.get("url"), "moodle_active": source.get("moodle_active"), "method": citation["method"], "locations": locations})
     return result
 
 
@@ -129,7 +140,7 @@ class MaterialService:
     def authorize(self, subject, subjects=None):
         if isinstance(subject, str):
             key = " ".join("".join(c for c in unicodedata.normalize("NFKD", subject.casefold()) if not unicodedata.combining(c)).split())
-            aliases = {"bd": "Bases de Datos", "bbdd": "Bases de Datos", "gbd": "Bases de Datos", "bases de datos": "Bases de Datos", "gestion de bases de datos": "Bases de Datos", "xestion de bases de datos": "Bases de Datos", "digitalizacion": "Digitalizacion", "aso": "ASO", "sad": "SAD", "iaw": "IAW"}
+            aliases = {"bd": "Bases de Datos", "bbdd": "Bases de Datos", "gbd": "Bases de Datos", "bases de datos": "Bases de Datos", "gestion de bases de datos": "Bases de Datos", "xestion de bases de datos": "Bases de Datos", "digitalizacion": "Digitalizacion", "aso": "ASO", "sad": "SAD", "iaw": "IAW", "sri": "SRI", "acp": "ACP", "afondamento": "ACP", "competencias profesionais": "ACP", "competencias profesionales": "ACP", "servicios de red e internet": "SRI", "servizos de rede e internet": "SRI"}
             subject = aliases.get(key, subject)
         allowed = self.settings.allowed_subjects if subjects is None else self.settings.allowed_subjects & frozenset(subjects)
         if not allowed or subject not in allowed:
@@ -139,6 +150,7 @@ class MaterialService:
     async def catalog(self, subjects=None):
         return await self.invoke(self._catalog, subjects)
 
+    @consistent_request
     def _catalog(self, subjects=None):
         self._open()
         allowed = self.settings.allowed_subjects if subjects is None else self.settings.allowed_subjects & frozenset(subjects)
@@ -156,7 +168,7 @@ class MaterialService:
                     item["units"].add(source["section"])
                     item["sources"].add(source["sha256"])
             entries = [{"name": subject, "units": sorted(item["units"]), "sources": len(item["sources"])} for subject, item in sorted(catalog.items())]
-        result = {"corpus_id": engine.metadata["corpus_sha256"], "subjects": entries, "answerability": "not_assessed", "data_is_untrusted": True, "capabilities": ["buscar_material", "leer_fragmento"], "transport": self.settings.transport}
+        result = {"corpus_id": engine.metadata["corpus_sha256"], "corpus_version": engine.metadata.get("version"), "subjects": entries, "answerability": "not_assessed", "data_is_untrusted": True, "capabilities": ["buscar_material", "leer_fragmento"], "transport": self.settings.transport}
         if size_bytes(result) > MAX_OUTPUT_BYTES:
             raise MaterialError("catalog_response_too_large")
         return result
@@ -169,10 +181,11 @@ class MaterialService:
             raise MaterialError("invalid_unit")
         return await self.invoke(self._search, query, subject, unit, mode, limit, native_only, exact)
 
+    @consistent_request
     def _search(self, query, subject, unit, mode, limit, native_only, exact):
         self._open()
         rows = self.retriever.search(query, mode, limit, subject, unit, native_only, exact)
-        result = {"corpus_id": self.retriever.engine.metadata["corpus_sha256"], "query": query, "mode": "literal" if exact else mode, "answerability": "not_assessed", "data_is_untrusted": True, "results": [], "omitted_results": 0}
+        result = {"corpus_id": self.retriever.engine.metadata["corpus_sha256"], "corpus_version": self.retriever.engine.metadata.get("version"), "query": query, "mode": "literal" if exact else mode, "answerability": "not_assessed", "data_is_untrusted": True, "results": [], "omitted_results": 0}
         for row in rows:
             refs = references(row["citations"])
             item = {"fragment_id": row["chunk_id"], "score": row["score"], "score_kind": row["score_kind"], "excerpt": row["excerpt"][:700], "requires_review": row["requires_review"], "warnings": row["warnings"], "references": refs[:3], "additional_references": max(0, len(refs) - 3)}
@@ -194,6 +207,7 @@ class MaterialService:
             raise MaterialError("invalid_unit")
         return await self.invoke(self._read, fragment_id, subject, unit, native_only, start, characters, neighbors)
 
+    @consistent_request
     def _read(self, fragment_id, subject, unit, native_only, start, characters, neighbors):
         self._open()
         main = self.retriever.engine.eligible(fragment_id, subject, unit, native_only)
@@ -203,7 +217,7 @@ class MaterialService:
             raise MaterialError("fragment_offset_out_of_range")
         end = min(len(main["text"]), start + characters)
         refs = references(main["citations"], start, end)
-        result = {"corpus_id": self.retriever.engine.metadata["corpus_sha256"], "answerability": "not_assessed", "data_is_untrusted": True, "fragment": {"fragment_id": fragment_id, "text": main["text"][start:end], "range": {"start": start, "end": end, "total": len(main["text"])}, "next_offset": end if end < len(main["text"]) else None, "requires_review": main["requires_review"], "warnings": main["warnings"], "references": refs[:3], "additional_references": max(0, len(refs) - 3)}, "context": [], "context_omitted": 0}
+        result = {"corpus_id": self.retriever.engine.metadata["corpus_sha256"], "corpus_version": self.retriever.engine.metadata.get("version"), "answerability": "not_assessed", "data_is_untrusted": True, "fragment": {"fragment_id": fragment_id, "text": main["text"][start:end], "range": {"start": start, "end": end, "total": len(main["text"])}, "next_offset": end if end < len(main["text"]) else None, "requires_review": main["requires_review"], "warnings": main["warnings"], "references": refs[:3], "additional_references": max(0, len(refs) - 3)}, "context": [], "context_omitted": 0}
         if size_bytes(result) > MAX_OUTPUT_BYTES - OUTPUT_RESERVE:
             raise MaterialError("read_response_too_large_reduce_characters")
         if neighbors:

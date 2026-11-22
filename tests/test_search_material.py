@@ -27,6 +27,15 @@ def build_fixture(root, chunks):
 
 
 class LexicalTests(unittest.TestCase):
+    def test_chunk_iterator_matches_materialized_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            chunks = [chunk("primero"), chunk("segundo")]
+            engine = SearchEngine(build_fixture(Path(tmp), chunks))
+            try:
+                self.assertEqual(list(engine.iter_chunks()), engine.all_chunks())
+            finally:
+                engine.close()
+
     def test_accents_literals_operators_and_review_flags(self):
         with tempfile.TemporaryDirectory() as tmp:
             db = build_fixture(Path(tmp), [chunk("Administración de procesos: ps aux | grep bash"), chunk('grep -E "^ERROR" log', method="ocr_supplement")])

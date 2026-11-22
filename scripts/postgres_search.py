@@ -59,21 +59,52 @@ class PostgresEngine:
         if staging:
             use_staging_schema(self.connection)
         self.encoder = None
+        self._request_depth = 0
         self.metadata = self._load_metadata()
 
     @contextmanager
     def _cursor(self):
+        if self._request_depth:
+            with self.connection.cursor() as cursor:
+                yield cursor
+        else:
+            with self.connection.transaction():
+                with self.connection.cursor() as cursor:
+                    cursor.execute("SET TRANSACTION READ ONLY")
+                    cursor.execute("SET LOCAL statement_timeout = '20s'")
+                    yield cursor
+
+    @contextmanager
+    def request(self):
+        """Una instantánea por herramienta; caché de metadata renovada por petición."""
+        if self._request_depth:
+            yield
+            return
         with self.connection.transaction():
             with self.connection.cursor() as cursor:
-                cursor.execute("SET TRANSACTION READ ONLY")
+                cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
                 cursor.execute("SET LOCAL statement_timeout = '20s'")
-                yield cursor
+            self._request_depth += 1
+            try:
+                previous = self.metadata
+                self.metadata = self._load_metadata()
+                if any(previous.get(k) != self.metadata.get(k) for k in ('model_fingerprint', 'dimensions')):
+                    self.encoder = None
+                yield
+            finally:
+                self._request_depth -= 1
 
     def _load_metadata(self):
         try:
             with self._cursor() as cursor:
                 cursor.execute("SELECT corpus_sha256, schema_version FROM asir.corpus WHERE id = 1")
                 corpus = cursor.fetchone()
+                cursor.execute("SELECT to_regclass('asir.rag_head') IS NOT NULL AS present")
+                version = None
+                if cursor.fetchone()['present']:
+                    cursor.execute('SELECT version FROM asir.rag_head WHERE id=1')
+                    head = cursor.fetchone()
+                    version = head['version'] if head else None
                 cursor.execute(
                     "SELECT model_fingerprint, model_repository, model_revision, dimensions, "
                     "max_tokens, overlap_tokens, context, vectors_sha256, corpus_sha256 "
@@ -88,6 +119,7 @@ class PostgresEngine:
             raise SearchFailure("database_corpus_mismatch")
         return {
             "schema_version": corpus["schema_version"],
+            "version": version,
             "corpus_sha256": corpus["corpus_sha256"],
             "model_fingerprint": embedding["model_fingerprint"],
             "model_repository": embedding["model_repository"],
@@ -143,7 +175,7 @@ class PostgresEngine:
         sql = (
             "SELECT c.id, c.ordinal, c.text, c.text_sha256, c.characters, c.warnings, c.requires_review, "
             "ci.id AS citation_id, ci.ordinal AS citation_ordinal, ci.method, ci.previous_chunk_id, ci.next_chunk_id, "
-            "s.sha256 AS source_sha256, s.subject, s.section, s.title, s.filename, s.url, s.mime, s.path, "
+            "s.sha256 AS source_sha256, s.subject, s.section, s.title, s.filename, s.url, s.mime, s.path, s.moodle_active, "
             "seg.ordinal AS segment_ordinal, seg.source_unit_id, seg.locator, seg.start_char, seg.end_char, "
             "seg.method AS segment_method, seg.quality "
             "FROM asir.chunks c "
@@ -185,6 +217,7 @@ class PostgresEngine:
                         "mime": row["mime"],
                         "filename": row["filename"],
                         "subject": row["subject"],
+                        "moodle_active": row["moodle_active"],
                     },
                     "segments": [],
                     "method": row["method"],

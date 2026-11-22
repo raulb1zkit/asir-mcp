@@ -1,0 +1,28 @@
+[Unit]
+Description=Muestreo de recursos del servidor MCP ASIR (collector raíz + muestra + exportación)
+# El collector habla con el socket de Docker; la muestra y la exportación solo
+# leen /proc, el SQLite propio y el JSON sanitizado que el collector acaba de
+# escribir. El panel nunca accede al socket.
+
+[Service]
+Type=oneshot
+# Varias ExecStart solo se permiten con Type=oneshot; el orden es secuencial.
+User=root
+Group=root
+WorkingDirectory=/opt/asir-sync/app
+StateDirectory=asir-monitor asir-dashboard
+ExecStart=/usr/bin/python3 /opt/asir-sync/app/scripts/server_monitor.py collector --output /var/lib/asir-monitor/container.json
+ExecStart=/usr/bin/python3 /opt/asir-sync/app/scripts/server_monitor.py sample --db /var/lib/asir-monitor/metrics.sqlite --container-json /var/lib/asir-monitor/container.json --rag-status /var/lib/asir-sync/rag-status.json --probe-url http://127.0.0.1:8080/mcp
+ExecStart=/usr/bin/python3 /opt/asir-sync/app/scripts/server_monitor.py export --db /var/lib/asir-monitor/metrics.sqlite --alerts /var/lib/asir-monitor/alerts.sqlite --output /var/lib/asir-dashboard/resources.json
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# El collector necesita el socket de Docker del host; con ProtectSystem=strict
+# basta para que ningún comando pueda escribir fuera de ReadWritePaths. Ningún
+# otro comando del panel ni del exportador usa el socket.
+ReadWritePaths=/var/lib/asir-monitor /var/lib/asir-dashboard

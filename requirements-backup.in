@@ -1,0 +1,3 @@
+# Dependencias opcionales del respaldo R2; separadas del runtime MCP.
+boto3==1.44.9
+cryptography==50.0.2

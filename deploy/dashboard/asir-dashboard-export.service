@@ -1,0 +1,14 @@
+[Unit]
+Description=Exportar resumen privado del MCP ASIR
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/asir-dashboard/app
+ExecStart=/usr/bin/python3 /opt/asir-dashboard/app/dashboard/export_snapshot.py --output /var/lib/asir-dashboard/status.json
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/asir-dashboard

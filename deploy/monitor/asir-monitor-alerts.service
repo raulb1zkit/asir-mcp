@@ -1,0 +1,25 @@
+[Unit]
+Description=Avisos Telegram del monitor MCP ASIR (incidencias, recuperación y resumen diario)
+# Requiere /etc/asir-monitor/telegram.json con {"token": "...", "chat_id": "..."},
+# propiedad de root y modo 0600. La configuración nunca va en Git, imagen ni argv.
+# Mientras el coordinador no provisione credenciales, la unidad falla sin enviar
+# nada (el CLI devuelve error de configuración); los avisos reales los validó el
+# coordinador aparte.
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/asir-sync/app
+StateDirectory=asir-monitor
+ExecStart=/usr/bin/python3 /opt/asir-sync/app/scripts/telegram_alerts.py --db /var/lib/asir-monitor/metrics.sqlite --state /var/lib/asir-monitor/alerts.sqlite --config /etc/asir-monitor/telegram.json
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/asir-monitor
+# Solo salida de red hacia la API de Telegram; la sonda no toca la base de datos.

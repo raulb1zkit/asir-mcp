@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "courses": [
+    {
+      "slug": "ejemplo-aso",
+      "subject": "ASO",
+      "course_url": "https://moodle.example.edu/course/view.php?id=1001",
+      "exclusions": [
+        {
+          "url": "https://moodle.example.edu/mod/assign/view.php?id=24601",
+          "reason": "Actividad de ejemplo: vista de entrega excluida de la adquisición"
+        }
+      ]
+    },
+    {
+      "slug": "ejemplo-bd",
+      "subject": "BD",
+      "course_url": "https://moodle.example.edu/course/view.php?id=1002",
+      "exclusions": []
+    },
+    {
+      "slug": "ejemplo-sri",
+      "subject": "SRI",
+      "course_url": "https://moodle.example.edu/course/view.php?id=1003",
+      "exclusions": []
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+# Compose de producción del MCP de ASIR.
+#
+# - `ASIR_IMAGE` debe ser una referencia inmutable por digest; la escribe el
+#   procedimiento de despliegue en /opt/asir/mcp/.env (estado del host, no de Git).
+# - `ASIR_ENV_FILE` apunta a las variables del servicio (en el VPS,
+#   /etc/asir/mcp.env). El puerto solo se publica en loopback para la entrada
+#   existente de Cloudflare.
+# - La unidad asir-mcp.service (unidad envolvente) invoca bin/asir-mcp-container
+#   para que el sudo limitado de asir-sync siga reiniciando exactamente el MCP.
+name: asir-mcp
+
+services:
+  mcp:
+    image: ${ASIR_IMAGE:?ASIR_IMAGE debe indicar ghcr.io/raulb1zkit/mcp-asir@sha256:...}
+    restart: "no"
+    # Igual que MemoryMax=2G de la unidad venv; CPU sin cuota como antes.
+    mem_limit: 2g
+    env_file:
+      - ${ASIR_ENV_FILE:?ASIR_ENV_FILE debe indicar el archivo de variables}
+    environment:
+      HOME: /var/lib/asir
+      # Dentro del contenedor debe escuchar en todas las interfaces para que
+      # el mapa de puertos llegue; el loopback lo garantiza el host con
+      # 127.0.0.1:8080. `environment` tiene prioridad sobre env_file, así que
+      # sobrescribe un ASIR_HOST=127.0.0.1 del archivo de variables real.
+      ASIR_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # Configuración privada en solo lectura. Se monta el directorio entero
+      # para que los reemplazos atómicos (tokens/usuarios OAuth) se propaguen.
+      - /etc/asir:/etc/asir:ro
+      # Estado persistente del servicio: métricas de peticiones y home.
+      - /var/lib/asir:/var/lib/asir
+      # El modelo E5 se vuelve a montar en solo lectura por encima del anterior.
+      - /var/lib/asir/models/multilingual-e5-small:/var/lib/asir/models/multilingual-e5-small:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s

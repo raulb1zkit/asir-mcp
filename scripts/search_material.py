@@ -118,6 +118,11 @@ class SearchEngine:
     def all_chunks(self):
         return [json.loads(r[0]) for r in self.db.execute("SELECT payload FROM chunks ORDER BY rowid")]
 
+    def iter_chunks(self):
+        """Itera chunks para procesos de construcción con memoria acotada."""
+        for row in self.db.execute("SELECT payload FROM chunks ORDER BY rowid"):
+            yield json.loads(row[0])
+
     def filters(self, subject, section, native_only):
         conditions, params = [], []
         if subject is not None:
