@@ -1,6 +1,7 @@
 "use strict";
 
-const SUPABASE_URL = "https://kwvezxkhrjouaidzoglj.supabase.co";
+// La URL del proyecto va en config.js (nunca en Git); plantilla en config.example.js.
+const SUPABASE_URL = window.ASIR_AUTH_CONFIG?.supabaseUrl || "";
 const PENDING_KEY = "asir_oauth_authorization_id";
 const statusNode = document.getElementById("status");
 const signIn = document.getElementById("sign-in");
@@ -24,7 +25,8 @@ function finish(redirectUrl) {
 
 async function main() {
   if (!window.supabase) return showError("No se ha podido cargar el acceso. Vuelve a intentarlo.");
-  if (!/^sb_publishable_[A-Za-z0-9_-]+$/.test(window.ASIR_AUTH_CONFIG?.publishableKey || "")) return showError("El acceso todavía no está configurado.");
+  if (!/^sb_publishable_[A-Za-z0-9_-]+$/.test(window.ASIR_AUTH_CONFIG?.publishableKey || "") ||
+    !/^https:\/\/[a-z0-9][a-z0-9-]{19,63}\.supabase\.co$/.test(window.ASIR_AUTH_CONFIG?.supabaseUrl || "")) return showError("El acceso todavía no está configurado.");
   const query = new URLSearchParams(window.location.search);
   let authorizationId = query.get("authorization_id") || sessionStorage.getItem(PENDING_KEY);
   if (!authorizationId || authorizationId.length > 512) return showError("Falta la solicitud de conexión. Iníciala desde tu cliente de IA.");

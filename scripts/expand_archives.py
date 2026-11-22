@@ -76,12 +76,41 @@ def archive_members(path, mime):
         raise ValueError("archive_format_unsupported")
 
 
-def run(manifest_path, output):
+def cached_members(reuse_manifest, source):
+    """Verifica todos los miembros antes de reutilizar una expansión completa."""
+    if not reuse_manifest:
+        return None
+    try:
+        root = reuse_manifest.parent.resolve()
+        previous = json.loads(reuse_manifest.read_text())
+        if not previous.get("complete") or previous.get("issues") or previous.get("version") != 1:
+            return None
+        archive = next((a for a in previous["archives"] if a["sha256"] == source["sha256"]), None)
+        if archive is None:
+            return None
+        items = [i for i in previous["items"] if i.get("archive_sha256") == source["sha256"]]
+        if len(items) != archive["members"]:
+            return None
+        result = []
+        for item in items:
+            path = (root / item["path"]).resolve()
+            if not path.is_relative_to(root) or not member_mime(item["archive_member"]):
+                return None
+            content = path.read_bytes()
+            if len(content) > MAX_MEMBER or hashlib.sha256(content).hexdigest() != item["sha256"]:
+                return None
+            result.append((item["archive_member"], content))
+        return result
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def run(manifest_path, output, reuse_manifest=None):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not manifest.get("complete") or manifest.get("issues"):
         raise ValueError("incomplete_manifest")
     result = {"version": 1, "course_url": manifest["course_url"], "subject": manifest["subject"], "complete": False, "items": [], "issues": [], "archives": []}
-    count = total = 0
+    count = total = reused = 0
     for source in manifest["items"]:
         if source.get("mime") not in {"application/g-zip", "application/zip", "application/x-7z-compressed"} or not source.get("sha256"):
             continue
@@ -90,27 +119,45 @@ def run(manifest_path, output):
             raise ValueError("archive_integrity_failed")
         entry = {"sha256": source["sha256"], "filename": source["filename"], "members": 0}
         result["archives"].append(entry)
-        for name, content in archive_members(path, source["mime"]):
+        cached = cached_members(reuse_manifest, source)
+        if cached is not None:
+            reused += 1
+        for name, content in (cached if cached is not None else archive_members(path, source["mime"])):
             count += 1
             total += len(content)
             if count > MAX_MEMBERS or len(content) > MAX_MEMBER or total > MAX_TOTAL:
                 raise ValueError("archive_expansion_limit")
             saved = store(output, content)
-            result["items"].append({**saved, "status": "downloaded", "kind": "archive-member", "url": source["url"], "title": source["title"] + " / " + name, "section": source["section"], "filename": name, "mime": member_mime(name), "archive_sha256": source["sha256"], "archive_member": name})
+            result["items"].append({**saved, "status": "downloaded", "kind": "archive-member", "url": source["url"], "title": source["title"] + " / " + name, "section": source["section"], "filename": name, "mime": member_mime(name), "archive_sha256": source["sha256"], "archive_member": name, "moodle_active": source.get("moodle_active")})
             entry["members"] += 1
+    # Un miembro idéntico puede aparecer en un ZIP actual (activo) y en uno
+    # preservado (inactivo): es el mismo objeto en el mismo sitio. Se conserva
+    # una sola vez y prevalece el estado activo, para no publicar procedencias
+    # contradictorias del mismo recurso.
+    unique = {}
+    for item in result["items"]:
+        key = (item["url"], item["title"], item["section"], item["filename"], item["mime"], item["sha256"])
+        previous = unique.get(key)
+        if previous is None or (previous.get("moodle_active") is not True and item.get("moodle_active") is True):
+            unique[key] = item
+    result["items"] = list(unique.values())
+    for entry in result["archives"]:
+        entry["members"] = sum(1 for item in result["items"] if item["archive_sha256"] == entry["sha256"])
     result["complete"] = True
     result["finished_at"] = datetime.now(timezone.utc).isoformat()
     result["expanded_bytes"] = total
+    result["summary"] = {"reused_archives": reused, "new_archives": len(result["archives"]) - reused}
     write_json(output / "manifest.json", result)
-    print(json.dumps({"members": count, "bytes": total, "archives": result["archives"]}, ensure_ascii=False))
+    print(json.dumps({"members": len(result["items"]), "bytes": total, "archives": result["archives"]}, ensure_ascii=False))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--reuse-manifest", type=Path)
     args = parser.parse_args()
-    run(args.manifest, args.output)
+    run(args.manifest, args.output, args.reuse_manifest)
 
 
 if __name__ == "__main__":

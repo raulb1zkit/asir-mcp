@@ -33,6 +33,8 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(tool.annotations.read_only_hint)
                 self.assertFalse(tool.annotations.open_world_hint)
                 self.assertNotIn("ctx", tool.input_schema["properties"])
+            search = next(t for t in tools if t.name == "buscar_material")
+            self.assertIn("SRI", search.input_schema["properties"]["asignatura"]["description"])
             resource = await client.read_resource("asir://catalogo")
             self.assertEqual(json.loads(resource.contents[0].text)["subjects"][0]["name"], "ASO")
             found = await client.call_tool("buscar_material", {"consulta": "prioridad", "modo": "lexical"})

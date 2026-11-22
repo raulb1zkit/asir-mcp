@@ -1,0 +1,7 @@
+# Override para pruebas aisladas: publica solo en loopback del propio host,
+# en un puerto alternativo sin ruta pública (Cloudflare solo enruta :8080).
+# No usar en producción.
+services:
+  mcp:
+    ports: !override
+      - "127.0.0.1:${ASIR_SMOKE_PORT:-18080}:8080"

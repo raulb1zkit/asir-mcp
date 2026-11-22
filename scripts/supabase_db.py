@@ -13,7 +13,7 @@ import stat
 
 ROOT = Path(__file__).resolve().parents[1]
 PRIVATE = ROOT / ".private"
-EXPECTED_PROJECT = "kwvezxkhrjouaidzoglj"
+EXPECTED_PROJECT = os.environ.get("ASIR_SUPABASE_PROJECT_REF", "your-project-ref")
 DEFAULT_ADMIN_CONFIG = PRIVATE / "supabase-connection.json"
 DEFAULT_CA = PRIVATE / "supabase-ca.crt"
 POOLER_HOST = re.compile(r"[a-z0-9.-]+\.pooler\.supabase\.com\Z")
@@ -110,6 +110,14 @@ def admin_config(path=DEFAULT_ADMIN_CONFIG):
 
 def service_config(path):
     return load_config(path, service=True)
+
+
+def ingest_config(path):
+    """El actualizador solo acepta la identidad con permisos limitados al corpus."""
+    config = load_config(path, service=True)
+    if config["role"] != "asir_ingest":
+        raise DatabaseConfigError("database_ingest_role_required")
+    return config
 
 
 def connect(config, *, application_name="asir", autocommit=False):

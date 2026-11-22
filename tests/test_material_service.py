@@ -7,9 +7,21 @@ import tempfile
 import time
 import unittest
 
-from scripts.material_service import MaterialError, MaterialService, Settings, MAX_OUTPUT_BYTES, compact_locations, size_bytes
+from scripts.material_service import MaterialError, MaterialService, Settings, MAX_OUTPUT_BYTES, compact_locations, references, size_bytes
 from scripts.semantic_search import Retriever
 from test_search_material import build_fixture, chunk
+
+
+class ReferenceStatusTests(unittest.TestCase):
+    def test_occurrence_flag_is_returned_and_unknown_stays_unknown(self):
+        citation = {
+            "source": {"sha256": "a" * 64, "subject": "SAD", "section": "UD1", "title": "Guia", "filename": "guia.pdf", "url": "https://moodle.test/file", "moodle_active": False},
+            "method": "native",
+            "segments": [{"locator": {"page": 1}, "start": 0, "end": 4}],
+        }
+        self.assertIs(references([citation])[0]["moodle_active"], False)
+        citation["source"]["moodle_active"] = None
+        self.assertIsNone(references([citation])[0]["moodle_active"])
 
 
 def material(text, method="native", subject="ASO", section="UD1"):
@@ -25,6 +37,7 @@ class MaterialTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
         self.first = material("crontab prioridad " + "a" * 600)
+        self.first["citations"][0]["source"]["moodle_active"] = False
         self.second = material("renice prioridad de procesos")
         self.ocr = material("crontab texto reconocido", method="ocr_supplement")
         citation = self.first["citations"][0]
@@ -55,6 +68,7 @@ class MaterialTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("/private/", encoded)
         self.assertEqual(found["answerability"], "not_assessed")
         self.assertTrue(found["data_is_untrusted"])
+        self.assertIs(found["results"][0]["references"][0]["moodle_active"], False)
         self.assertEqual(found["results"][0]["references"][0]["locations"], [{"kind": "block", "start": 1, "end": 2}])
 
     async def test_review_flags_survive_search_and_read(self):
@@ -149,13 +163,22 @@ class MaterialTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["name"] for item in catalog["subjects"]], ["ASO"])
 
     async def test_subject_aliases_resolve_before_authorization(self):
-        service = MaterialService(Settings(database=self.db, allowed_subjects=frozenset({"ASO", "Bases de Datos", "Digitalizacion"})))
+        service = MaterialService(Settings(database=self.db, allowed_subjects=frozenset({"ASO", "Bases de Datos", "Digitalizacion", "SRI", "ACP"})))
         self.addAsyncCleanup(service.close)
         for alias in ("Xestión de Bases de Datos", "Gestión de Bases de Datos", "BBDD"):
             self.assertEqual(service.authorize(alias, {"Bases de Datos"}), "Bases de Datos")
             with self.assertRaisesRegex(MaterialError, "subject_not_available"):
                 service.authorize(alias, {"ASO"})
         self.assertEqual(service.authorize("Digitalización", {"Digitalizacion"}), "Digitalizacion")
+        for alias in ("sri", "Servicios de red e Internet", "Servizos de rede e Internet"):
+            self.assertEqual(service.authorize(alias, {"SRI"}), "SRI")
+            with self.assertRaisesRegex(MaterialError, "subject_not_available"):
+                service.authorize(alias, {"ASO"})
+
+        for alias in ("acp", "Afondamento", "Competencias Profesionais"):
+            self.assertEqual(service.authorize(alias, {"ACP"}), "ACP")
+            with self.assertRaisesRegex(MaterialError, "subject_not_available"):
+                service.authorize(alias, {"ASO"})
 
     async def test_catalog_uses_metadata_aggregation_when_available(self):
         engine = self.service.retriever.engine

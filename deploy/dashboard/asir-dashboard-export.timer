@@ -1,0 +1,10 @@
+[Unit]
+Description=Actualizar resumen del panel MCP ASIR
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=10s
+Unit=asir-dashboard-export.service
+
+[Install]
+WantedBy=timers.target

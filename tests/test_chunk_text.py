@@ -78,10 +78,15 @@ class ChunkTests(unittest.TestCase):
     def test_exact_dedup_keeps_both_sources_and_no_self_links(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            native, ocr = fixture(root, [document("a"), document("b")])
+            first = document("a")
+            first["source"]["moodle_active"] = False
+            second = document("b")
+            second["source"]["moodle_active"] = True
+            native, ocr = fixture(root, [first, second])
             chunks = self.execute(native, ocr, root / "out")
         self.assertEqual(len(chunks), 1)
         self.assertEqual(len(chunks[0]["citations"]), 2)
+        self.assertEqual([c["source"]["moodle_active"] for c in chunks[0]["citations"]], [False, True])
         for citation in chunks[0]["citations"]:
             self.assertNotEqual(citation["next_chunk_id"], chunks[0]["id"])
             self.assertNotEqual(citation["previous_chunk_id"], chunks[0]["id"])

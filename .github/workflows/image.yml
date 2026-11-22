@@ -1,0 +1,52 @@
+# Construcción local de la imagen del MCP y comprobaciones estáticas.
+# Demostración pública del build: NO publica paquetes en GHCR (la publicación
+# y el despliegue siguen su flujo operativo propio, con digest inmutable).
+name: image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - requirements-mcp.txt
+      - scripts/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-build-local
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Prepara buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Construye la imagen (carga local, sin publicar)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: mcp-asir:local
+          provenance: false
+          cache-from: type=gha,scope=asir-mcp
+          cache-to: type=gha,mode=max,scope=asir-mcp
+
+      - name: Comprobaciones estáticas de la imagen
+        run: |
+          set -euo pipefail
+          uid="$(docker run --rm --entrypoint id mcp-asir:local -u)"
+          gid="$(docker run --rm --entrypoint id mcp-asir:local -g)"
+          test "$uid" = 999 && test "$gid" = 983
+          docker run --rm --entrypoint sh mcp-asir:local -c \
+            'test ! -e /opt/asir/app/data && test ! -e /opt/asir/app/.private && test ! -e /opt/asir/app/backups'
+          echo "imagen: uid/gid no privilegiados; sin material, backups ni credenciales"

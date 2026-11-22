@@ -473,7 +473,7 @@ def extract(source, source_root, render_html=False):
     elif mime == "text/html" and render_html:
         units, warnings, details = manual_html_extract(path)
         engine = "html-main-text"
-    elif mime in {"text/plain", "text/csv", "text/html", "text/css", "application/x-sh"}:
+    elif mime in {"text/plain", "text/markdown", "text/csv", "text/html", "text/css", "application/x-sh"}:
         units, warnings, details = plain_extract(path, mime)
         engine = "text-csv"
     elif mime in {"image/png", "image/jpeg", "image/tiff", "image/gif"}:
@@ -487,7 +487,7 @@ def extract(source, source_root, render_html=False):
         warnings.append("unicode_replacement_character")
     for unit in units:
         unit["id"] = source["sha256"][:16] + ":" + ":".join(f"{k}-{v}" for k, v in unit["locator"].items())
-    return {"schema_version": 1, "source": {k: source[k] for k in ["sha256", "path", "url", "title", "section", "mime", "filename"]}, "extractor": {"name": engine, "version": VERSION, **details}, "units": units, "warnings": sorted(set(warnings)), "characters": sum(len(u["text"]) for u in units)}
+    return {"schema_version": 1, "source": {**{k: source[k] for k in ["sha256", "path", "url", "title", "section", "mime", "filename"]}, "moodle_active": source.get("moodle_active")}, "extractor": {"name": engine, "version": VERSION, **details}, "units": units, "warnings": sorted(set(warnings)), "characters": sum(len(u["text"]) for u in units)}
 
 
 def save_json(path, value):
@@ -497,7 +497,89 @@ def save_json(path, value):
     tmp.replace(path)
 
 
-def run(manifest_path, output, sample=False, allow_unsupported=False, render_html=False):
+SOURCE_FIELDS = ["sha256", "path", "url", "title", "section", "mime", "filename"]
+
+
+def source_metadata(item):
+    return {**{key: item[key] for key in SOURCE_FIELDS}, "moodle_active": item.get("moodle_active")}
+
+
+def valid_reusable_document(document, sha256):
+    """Comprueba que un documento cacheado es íntegro y de esta versión del extractor."""
+    if not isinstance(document, dict):
+        return False
+    source, extractor, units = document.get("source"), document.get("extractor"), document.get("units")
+    if not isinstance(source, dict) or source.get("sha256") != sha256:
+        return False
+    if not isinstance(extractor, dict) or extractor.get("version") != VERSION or not isinstance(extractor.get("name"), str):
+        return False
+    if not isinstance(units, list) or not isinstance(document.get("characters"), int) or not isinstance(document.get("warnings"), list):
+        return False
+    for unit in units:
+        if not isinstance(unit, dict) or not isinstance(unit.get("text"), str) or not isinstance(unit.get("locator"), dict) or not isinstance(unit.get("warnings"), list):
+            return False
+    return True
+
+
+def load_reuse_documents(report_path, render_html):
+    """Carga documentos reutilizables de un informe completo; descarta entradas no válidas."""
+    if report_path is None:
+        return {}
+    try:
+        report = json.loads(report_path.read_bytes())
+    except (OSError, ValueError) as error:
+        raise ExtractionFailure("reuse_report_unreadable") from error
+    if not isinstance(report, dict) or not isinstance(report.get("documents"), list):
+        raise ExtractionFailure("reuse_report_invalid")
+    if report.get("complete") is not True:
+        raise ExtractionFailure("reuse_report_incomplete")
+    # Los informes antiguos registran el motor HTML en cada documento.
+    if report.get("errors") or report.get("extractor_version") != VERSION or ("render_html" in report and bool(report["render_html"]) != render_html):
+        return {}
+    base = report_path.resolve().parent
+    reusable = {}
+    for entry in report["documents"]:
+        if not isinstance(entry, dict):
+            continue
+        sha256, path_value, document_sha256 = entry.get("source_sha256"), entry.get("path"), entry.get("document_sha256")
+        if not (isinstance(sha256, str) and isinstance(path_value, str) and isinstance(document_sha256, str)) or sha256 in reusable:
+            continue
+        relative = Path(path_value)
+        if relative.is_absolute():
+            continue
+        path = (base / relative).resolve()
+        if not path.is_relative_to(base):
+            continue
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        if hashlib.sha256(data).hexdigest() != document_sha256:
+            continue
+        try:
+            document = json.loads(data)
+        except ValueError:
+            continue
+        if valid_reusable_document(document, sha256):
+            if document["source"].get("mime") == "text/html" and (document["extractor"]["name"] == "html-main-text") != render_html:
+                continue
+            reusable[sha256] = document
+    return reusable
+
+
+def readable_text(document):
+    return "\n\n".join("[" + ", ".join(f"{k} {v}" for k, v in u["locator"].items()) + "]\n" + (u["list_label"] + " " if u.get("list_label") else "") + u["text"] for u in document["units"])
+
+
+def store_document(output, item, document, reused):
+    relative = Path("documents") / (item["sha256"] + ".json")
+    save_json(output / relative, document)
+    (output / relative.with_suffix(".txt")).write_text(readable_text(document) + "\n", encoding="utf-8")
+    flags = sorted(set(document["warnings"] + [f for u in document["units"] for f in u["warnings"]]))
+    return {"source_sha256": item["sha256"], "title": item["title"], "mime": item["mime"], "path": relative.as_posix(), "document_sha256": hashlib.sha256((output / relative).read_bytes()).hexdigest(), "characters": document["characters"], "units": len(document["units"]), "warnings": flags, "review_required": bool(flags), "reused": reused}
+
+
+def run(manifest_path, output, sample=False, allow_unsupported=False, render_html=False, reuse_report=None):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not manifest.get("complete") or manifest.get("issues"):
         raise ExtractionFailure("import_manifest_not_complete")
@@ -513,18 +595,31 @@ def run(manifest_path, output, sample=False, allow_unsupported=False, render_htm
                 by_mime[item["mime"]] = item
         selected = list(by_mime.values())
     output.mkdir(parents=True, exist_ok=True)
+    reusable = load_reuse_documents(reuse_report, render_html)
     poppler = subprocess.run(["pdftotext", "-v"], capture_output=True, check=False).stderr.decode("utf-8", errors="replace").splitlines()[0]
-    report = {"schema_version": 1, "extractor_version": VERSION, "runtime": {"python": sys.version.split()[0], "poppler": poppler}, "started_at": datetime.now(timezone.utc).isoformat(), "mode": "sample" if sample else "all", "source_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(), "documents": [], "errors": [], "skipped": []}
+    report = {"schema_version": 1, "extractor_version": VERSION, "render_html": render_html, "runtime": {"python": sys.version.split()[0], "poppler": poppler}, "started_at": datetime.now(timezone.utc).isoformat(), "mode": "sample" if sample else "all", "source_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(), "documents": [], "reused_documents": [], "new_documents": [], "errors": [], "skipped": []}
     for item in selected:
         try:
-            document = extract(item, manifest_path.parent, render_html)
-            document["source_aliases"] = [{k: alias[k] for k in ["sha256", "path", "url", "title", "section", "mime", "filename"]} for alias in sources[item["sha256"]][1:]]
-            relative = Path("documents") / (item["sha256"] + ".json")
-            save_json(output / relative, document)
-            readable = "\n\n".join("[" + ", ".join(f"{k} {v}" for k, v in u["locator"].items()) + "]\n" + (u["list_label"] + " " if u.get("list_label") else "") + u["text"] for u in document["units"])
-            (output / relative.with_suffix(".txt")).write_text(readable + "\n", encoding="utf-8")
-            flags = sorted(set(document["warnings"] + [f for u in document["units"] for f in u["warnings"]]))
-            report["documents"].append({"source_sha256": item["sha256"], "title": item["title"], "mime": item["mime"], "path": relative.as_posix(), "document_sha256": hashlib.sha256((output / relative).read_bytes()).hexdigest(), "characters": document["characters"], "units": len(document["units"]), "warnings": flags, "review_required": bool(flags)})
+            aliases = [source_metadata(alias) for alias in sources[item["sha256"]][1:]]
+            cached = reusable.get(item["sha256"])
+            if cached and cached["source"].get("mime") != item["mime"]:
+                cached = None
+            if cached is None:
+                document = extract(item, manifest_path.parent, render_html)
+                document["source_aliases"] = aliases
+                reused = False
+            else:
+                path = (manifest_path.parent / item["path"]).resolve()
+                if not path.is_relative_to(manifest_path.parent.resolve()):
+                    raise ExtractionFailure("source_path_outside_root")
+                if hashlib.sha256(path.read_bytes()).hexdigest() != item["sha256"]:
+                    raise ExtractionFailure("source_hash_mismatch")
+                document = cached
+                document["source"] = source_metadata(item)
+                document["source_aliases"] = aliases
+                reused = True
+            report["documents"].append(store_document(output, item, document, reused))
+            (report["reused_documents"] if reused else report["new_documents"]).append(item["sha256"])
         except (ExtractionFailure, OSError, ValueError, TypeError, ET.ParseError, zipfile.BadZipFile, KeyError, csv.Error) as error:
             if allow_unsupported and isinstance(error, ExtractionFailure) and str(error) == "unsupported_mime":
                 report["skipped"].append({"source_sha256": item["sha256"], "mime": item["mime"], "filename": item["filename"], "reason": "unsupported_mime"})
@@ -532,7 +627,7 @@ def run(manifest_path, output, sample=False, allow_unsupported=False, render_htm
             report["errors"].append({"source_sha256": item["sha256"], "error": str(error) if isinstance(error, ExtractionFailure) else type(error).__name__})
     report["finished_at"] = datetime.now(timezone.utc).isoformat()
     report["complete"] = not report["errors"] and len(report["documents"]) + len(report["skipped"]) == len(selected)
-    report["summary"] = {"documents": len(report["documents"]), "characters": sum(d["characters"] for d in report["documents"]), "units": sum(d["units"] for d in report["documents"]), "review_required": sum(d["review_required"] for d in report["documents"]), "warnings": dict(Counter(w for d in report["documents"] for w in d["warnings"]))}
+    report["summary"] = {"documents": len(report["documents"]), "characters": sum(d["characters"] for d in report["documents"]), "units": sum(d["units"] for d in report["documents"]), "review_required": sum(d["review_required"] for d in report["documents"]), "reused_documents": len(report["reused_documents"]), "new_documents": len(report["new_documents"]), "warnings": dict(Counter(w for d in report["documents"] for w in d["warnings"]))}
     save_json(output / "report.json", report)
     print(json.dumps({"complete": report["complete"], **report["summary"], "errors": report["errors"], "report": str(output / "report.json")}, ensure_ascii=False))
     return 0 if report["complete"] else 1
@@ -545,12 +640,13 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--allow-unsupported", action="store_true", help="Registra formatos no compatibles como omitidos, sin ocultar errores de extracción.")
     parser.add_argument("--render-html", action="store_true", help="Extrae texto del layout-content del manual HTML.")
+    parser.add_argument("--reuse-report", type=Path, help="Reutiliza documentos válidos de un informe previo completo.")
     args = parser.parse_args()
     output = args.output or ROOT / "data/aso/extracted" / args.mode
     try:
         if any(shutil.which(cmd) is None for cmd in ["pdftotext", "pdfinfo", "pdfimages"]):
             raise ExtractionFailure("missing_poppler_tools")
-        return run(args.manifest, output, args.mode == "sample", args.allow_unsupported, args.render_html)
+        return run(args.manifest, output, args.mode == "sample", args.allow_unsupported, args.render_html, args.reuse_report)
     except (ExtractionFailure, OSError, ValueError) as error:
         print(str(error) if isinstance(error, ExtractionFailure) else "No se han podido leer los archivos locales.", file=sys.stderr)
         return 1

@@ -1,0 +1,24 @@
+[Unit]
+Description=MCP de ASIR (contenedor OCI)
+Documentation=file:///opt/asir/mcp
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+# Mantenimiento persistente acordado: la presencia del marcador impide el
+# arranque. El drop-in /etc/systemd/system/asir-mcp.service.d/maintenance.conf
+# del VPS añade la misma condición; aquí se conserva también para que la unidad
+# sea correcta por sí sola.
+ConditionPathExists=!/etc/asir/maintenance
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+WorkingDirectory=/opt/asir/mcp
+ExecStart=/opt/asir/mcp/bin/asir-mcp-container start
+ExecStop=/opt/asir/mcp/bin/asir-mcp-container stop
+TimeoutStartSec=90
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

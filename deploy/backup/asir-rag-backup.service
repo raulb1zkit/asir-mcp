@@ -1,0 +1,29 @@
+[Unit]
+Description=Respaldo cifrado y retención local de versiones RAG (R2)
+# Requiere /etc/asir-sync/r2-backup.json en modo 0600 propiedad de asir-sync y
+# una clave de recuperación con copia fuera del VPS. Sin esa copia NO se activa:
+# perder la clave impide restaurar. La unidad no se habilita hasta que la
+# coordinación complete el ensayo de restauración aislada.
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=asir-sync
+Group=asir-sync
+WorkingDirectory=/opt/asir-sync/app
+Environment=OMP_THREAD_LIMIT=1
+# Cada ciclo renueva primero el uso account-wide, respalda el head estable y
+# solo ejecuta retención local/remota si el backup y todos los pins se validan.
+ExecStart=/opt/asir/venv/bin/python -m scripts.rag_version_backup run-cycle --status /var/lib/asir-sync/rag-status.json --version-root /var/lib/asir-sync/versioning --bundles /var/lib/asir-sync/versions-bundles --config /etc/asir-sync/r2-backup.json --state-dir /var/lib/asir-sync/backup --usage-credentials /etc/asir-sync/cloudflare-usage.json
+UMask=0077
+Nice=10
+# Empaquetado sintético de 13k chunks/27k vectores (manifiesto 250 MB) alcanzó
+# ~620 MiB RSS; 1 GiB deja margen sin reservar una fracción excesiva del host 4 GiB.
+MemoryMax=1G
+TimeoutStartSec=30min
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/asir-sync
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

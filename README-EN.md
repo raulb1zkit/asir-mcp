@@ -9,8 +9,7 @@ private document corpus to AI clients without giving them direct access to the
 database or the educational platform.
 
 > The code is public; the corpus is not. Access to the deployed server requires
-> individual approval. To request access, email
-> [me@raulcn.com](mailto:me@raulcn.com) with your Google account address.
+> individual approval. Access requests are handled privately; no contact address is published.
 
 ## What it does
 

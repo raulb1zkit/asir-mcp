@@ -14,3 +14,7 @@ __pycache__/
 *.pyc
 .venv/
 .obsidian/
+
+# Estado generado de las pruebas aisladas de Docker (fixtures y métricas)
+/deploy/docker/ci/fixtures/
+/deploy/docker/ci/state/

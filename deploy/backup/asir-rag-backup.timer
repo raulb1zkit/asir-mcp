@@ -1,0 +1,15 @@
+[Unit]
+Description=Respaldo diario del RAG ASIR a las 03:20 de Madrid
+# Deshabilitado por defecto: solo se habilita tras probar prefijo vacío,
+# inicializar el catálogo, respaldar una versión y restaurarla aislada.
+# Reintenta con Persistent=true el día en que el VPS estuvo apagado.
+
+[Timer]
+OnCalendar=*-*-* 03:20:00 Europe/Madrid
+RandomizedDelaySec=10min
+AccuracySec=1min
+Persistent=true
+Unit=asir-rag-backup.service
+
+[Install]
+WantedBy=timers.target

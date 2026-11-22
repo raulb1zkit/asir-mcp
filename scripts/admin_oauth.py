@@ -17,7 +17,7 @@ except ImportError:
     from mcp_auth import TokenConfigError
 
 
-SUBJECTS = ("ASO", "Bases de Datos", "SAD", "IAW", "Digitalizacion", "SRI")
+SUBJECTS = ("ASO", "Bases de Datos", "SAD", "IAW", "Digitalizacion", "SRI", "ACP")
 
 
 def make_handler(path, password, csrf, port):

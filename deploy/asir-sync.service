@@ -1,0 +1,35 @@
+[Unit]
+Description=Actualización nocturna del corpus ASIR
+Wants=network-online.target
+After=network-online.target
+# Tras cada ciclo correcto (publicado o sin cambios) se dispara el respaldo:
+# unidad separada e idempotente; el agente de backup refresca uso R2, pines,
+# copia y retención. Un fallo de backup no revierte el corpus publicado.
+OnSuccess=asir-rag-backup.service
+
+[Service]
+Type=oneshot
+User=asir-sync
+Group=asir-sync
+WorkingDirectory=/opt/asir-sync/app
+UMask=0077
+Environment=OMP_THREAD_LIMIT=1
+Environment=OPENBLAS_NUM_THREADS=1
+StateDirectory=asir-sync
+ExecStart=/opt/asir/venv/bin/python /opt/asir-sync/app/scripts/sync_materials.py --execute --rag-delta-publish --staging --scheduled --data-root /var/lib/asir-sync/data --state-dir /var/lib/asir-sync --session-file /etc/asir-sync/moodle-session.json --credentials-file /etc/asir-sync/moodle-credentials.json --database-config /etc/asir-sync/database.json --model /var/lib/asir/models/multilingual-e5-small --tessdata /var/lib/asir-sync/tessdata --rag-resource-map /var/lib/asir-sync/resource-registry.json
+# Modo delta obligatorio: sin --rag-delta-publish o --legacy-full-publish el
+# sincronizador falla antes de construir. La primera migración no reimporta el
+# corpus: se instala el esquema privado y se reconcilia con --bootstrap
+# (scripts/rag_publish) contra la copia publicada, no con --legacy-full-publish.
+# La copia drop-in de publicación repite esta línea añadiendo --publish,
+# --rollback-candidate y --probe-token-file; debe mantener --rag-delta-publish
+# y --rag-resource-map o el nuevo programa fallaría al publicar.
+Nice=15
+CPUQuota=100%
+MemoryMax=2G
+TimeoutStartSec=8h
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/etc/asir-sync /var/lib/asir-sync
+NoNewPrivileges=yes

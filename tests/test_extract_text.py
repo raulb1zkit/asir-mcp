@@ -189,13 +189,23 @@ class ExtractTests(unittest.TestCase):
             self.assertEqual(units[0]["text"], "selección")
             self.assertIn("encoding_cp1252_assumed_requires_review", warnings)
 
+    def test_markdown_preserves_source_syntax_and_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = "# Guía\n\n```bash\ngit merge rama\n```\n\n[Referencia](https://example.test)\n"
+            (root / "example.md").write_text(raw, encoding="utf-8")
+            source = {"path": "example.md", "sha256": hashlib.sha256(raw.encode()).hexdigest(), "mime": "text/markdown", "url": "https://example.test/example.md", "title": "Ejemplo", "section": "Markdown", "filename": "example.md"}
+            doc = extract(source, root)
+            self.assertEqual(doc["units"][0]["text"], raw)
+            self.assertEqual(doc["source"]["mime"], "text/markdown")
+
     def test_duplicate_hash_preserves_source_aliases(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             raw = b"hello"
             (root / "source.txt").write_bytes(raw)
             source = {"path": "source.txt", "sha256": hashlib.sha256(raw).hexdigest(), "mime": "text/plain", "url": "https://example.test/a", "title": "A", "section": "UD1", "filename": "source.txt"}
-            manifest = {"complete": True, "issues": [], "items": [source, {**source, "url": "https://example.test/b", "title": "B"}]}
+            manifest = {"complete": True, "issues": [], "items": [{**source, "moodle_active": False}, {**source, "url": "https://example.test/b", "title": "B", "moodle_active": True}]}
             path = root / "manifest.json"
             path.write_text(json.dumps(manifest))
             with redirect_stdout(io.StringIO()):
@@ -204,6 +214,8 @@ class ExtractTests(unittest.TestCase):
             doc = json.loads((root / "output" / report["documents"][0]["path"]).read_text())
             self.assertEqual(doc["source"]["title"], "A")
             self.assertEqual(doc["source_aliases"][0]["title"], "B")
+            self.assertIs(doc["source"]["moodle_active"], False)
+            self.assertIs(doc["source_aliases"][0]["moodle_active"], True)
 
     def test_batch_failure_is_reported_and_original_remains(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Entrada única de la clave de despliegue de GitHub Actions.
+#
+# La línea authorized_keys es:
+#   restrict,command="/usr/local/sbin/asir-deploy-entry" ssh-ed25519 ... asir-deploy
+# `restrict` retoma reenvíos, PTY y rc del usuario. Solo se admiten verbos
+# y argumentos validados; el código privilegiado está instalado localmente.
+# No se acepta código ejecutable por stdin.
+set -euo pipefail
+umask 077
+
+# No permitir overrides locales de prueba desde una sesión SSH.
+unset ASIR_PROJECT_DIR ASIR_MAINTENANCE_MARKER ASIR_SYSTEMD_DIR ASIR_VENV_PYTHON ASIR_HEALTH_URL ASIR_MCP_URL ASIR_SMOKE_PORT
+read -r -a argv <<< "${SSH_ORIGINAL_COMMAND:-}"
+if [ "${#argv[@]}" -eq 0 ]; then
+  echo "asir-deploy-entry: falta el comando" >&2
+  exit 64
+fi
+
+case "${argv[0]}" in
+  sync)
+    if [ "${#argv[@]}" -ne 1 ]; then
+      echo "asir-deploy-entry: sync no admite argumentos" >&2
+      exit 64
+    fi
+    exec /usr/local/sbin/asir-deploy-sync
+    ;;
+  run)
+    if [ "${#argv[@]}" -lt 2 ]; then
+      echo "asir-deploy-entry: run necesita un subcomando" >&2
+      exit 64
+    fi
+    for arg in "${argv[@]:1}"; do
+      if [[ ! "$arg" =~ ^[A-Za-z0-9@:._/=-]{1,200}$ ]]; then
+        echo "asir-deploy-entry: argumento no permitido" >&2
+        exit 64
+      fi
+    done
+    token_line="-"
+    IFS= read -r token_line || token_line="-"
+    export ASIR_GHCR_TOKEN="$token_line"
+    exec /usr/local/sbin/asir-deploy-run "${argv[@]:1}"
+    ;;
+  *)
+    echo "asir-deploy-entry: comando no permitido" >&2
+    exit 64
+    ;;
+esac

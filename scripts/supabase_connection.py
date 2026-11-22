@@ -15,7 +15,7 @@ from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 PRIVATE = ROOT / ".private/supabase-connection.json"
-EXPECTED_PROJECT = "kwvezxkhrjouaidzoglj"
+EXPECTED_PROJECT = os.environ.get("ASIR_SUPABASE_PROJECT_REF", "your-project-ref")
 CHECK_SQL = """BEGIN READ ONLY;
 SET LOCAL statement_timeout = '10s';
 SELECT json_build_object(

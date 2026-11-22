@@ -1,0 +1,46 @@
+# Override de pruebas: PostgreSQL sintético con TLS y alias de red que
+# reproduce el host del pooler (ci.pooler.supabase.com). Sin corpus real ni
+# credenciales reales; el certificado y el esquema los genera ci/make-fixtures.sh
+# y ci/schema-synthetic.sql. Requiere antes el volumen de claves:
+#   docker volume create asir-ci-pg-certs
+#   docker run --rm --entrypoint sh -v asir-ci-pg-certs:/certs \
+#     -v "$PWD/deploy/docker/ci/fixtures:/fix:ro" postgres@sha256:b60e9004... \
+#     -c 'cp /fix/ci-server.crt /fix/ci-server.key /certs/ && chown 999:999 /certs/ci-server.key && chmod 600 /certs/ci-server.key && chmod 644 /certs/ci-server.crt'
+services:
+  db:
+    image: postgres:17@sha256:b60e90042aa6b8dbecd58e224b3e36114dbf8ad754465264c2476ad58a86e45c
+    command:
+      - postgres
+      - -c
+      - port=6543
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/certs/ci-server.crt
+      - -c
+      - ssl_key_file=/certs/ci-server.key
+    environment:
+      POSTGRES_USER: asir_reader.${ASIR_SUPABASE_PROJECT_REF:-your-project-ref}
+      POSTGRES_PASSWORD: ${CI_PG_PASSWORD:-synthetic-ci-only}
+      POSTGRES_DB: postgres
+    volumes:
+      - pg-certs:/certs:ro
+      - ./ci/schema-synthetic.sql:/docker-entrypoint-initdb.d/10-synthetic.sql:ro
+    networks:
+      default:
+        aliases:
+          - ci.pooler.supabase.com
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -p 6543 -U asir_reader.${ASIR_SUPABASE_PROJECT_REF:-your-project-ref} || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+  mcp:
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pg-certs:
+    external: true
+    name: asir-ci-pg-certs

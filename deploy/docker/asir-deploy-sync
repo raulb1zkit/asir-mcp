@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+# Root-installed synchronizer; stdin contains only archive data.
+import os, pathlib, shutil, sys, tarfile, tempfile
+root = pathlib.Path(sys.argv[1] if len(sys.argv) == 2 else "/opt/asir/mcp")
+root.mkdir(mode=0o755, parents=True, exist_ok=True)
+allowed = {"compose.yaml", "compose.smoke.yaml", "compose.fixtures.yaml", "compose.pgci.yaml", "asir-mcp.service", "bin/asir-mcp-container"}
+raw = sys.stdin.buffer.read(1_048_577)
+if len(raw) > 1_048_576:
+    raise SystemExit("asir-deploy-sync: archivo mayor que 1 MiB")
+with tempfile.NamedTemporaryFile(dir=root, prefix=".sync-") as stream:
+    stream.write(raw); stream.flush()
+    with tarfile.open(stream.name, "r:*") as archive:
+        members = []
+        seen = set()
+        total = 0
+        for member in archive:
+            members.append(member)
+            if len(members) > 64:
+                raise SystemExit("asir-deploy-sync: demasiados miembros")
+            total += member.size
+            if total > 1_048_576:
+                raise SystemExit("asir-deploy-sync: contenido expandido mayor que 1 MiB")
+            name = member.name.removeprefix("./")
+            if name == "bin" and member.isdir():
+                continue
+            if name not in allowed or name in seen or not member.isfile() or member.issym() or member.islnk():
+                raise SystemExit("asir-deploy-sync: miembro tar no permitido")
+            if member.size > 256_000:
+                raise SystemExit("asir-deploy-sync: miembro demasiado grande")
+            seen.add(name)
+        for member in members:
+            name = member.name.removeprefix("./")
+            if member.isdir():
+                continue
+            dest = root / name
+            dest.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(prefix=".incoming-", dir=dest.parent)
+            try:
+                with os.fdopen(fd, "wb") as out, archive.extractfile(member) as src:
+                    shutil.copyfileobj(src, out)
+                    out.flush(); os.fsync(out.fileno())
+                os.chmod(tmp, 0o755 if name.endswith(".sh") or name.endswith("/asir-mcp-container") else 0o644)
+                os.replace(tmp, dest)
+            finally:
+                if os.path.exists(tmp): os.unlink(tmp)
+print("sincronizados manifiestos permitidos")
